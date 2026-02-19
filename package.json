@@ -1,18 +1,21 @@
 {
   "name": "napcat-plugin-mkbot",
-  "plugin": "MK",
+  "plugin": "MKbot",
   "version": "2.1.1",
   "type": "module",
   "main": "index.mjs",
-  "description": "MK - 综合娱乐插件",
+  "description": "MKbot - 综合娱乐和群管，包含授权系统、群管功能、娱乐系统、系统监控等",
   "author": "三个句号",
+  "license": "MIT",
+  "homepage": "https://github.com/tc-404/napcat-plugin-mkbot",
   "webui": "webui/dashboard.html",
   "napcat": {
     "tags": [
       "娱乐",
       "群管"
     ],
-    "minVersion": "4.17.10"
+    "minVersion": "4.17.10",
+    "homepage": "https://github.com/tc-404/napcat-plugin-mkbot"
   },
   "dependencies": {
     "napcat-types": "0.0.9"
