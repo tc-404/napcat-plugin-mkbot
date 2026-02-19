@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MKbot插件</title>
+  <script src="static/plugin-info.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #f0f2f5;
+      color: #1f2937;
+      font-size: 16px;
+      transition: background 0.4s ease, color 0.4s ease;
+    }
+
+    html.dark, html.dark body {
+      background: #18191C;
+      color: #e5e7eb;
+    }
+
+    .app-layout {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+
+    header {
+      background: white;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+      gap: 16px;
+    }
+
+    .dark header {
+      background: #2a2b2e;
+      border-color: #3f4045;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .header-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #1f2937;
+      flex: 1;
+    }
+
+    .dark .header-title {
+      color: #e5e7eb;
+    }
+
+    .refresh-btn {
+      padding: 8px 16px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .refresh-btn:hover {
+      background: #2563eb;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .refresh-btn:active {
+      transform: scale(0.95);
+    }
+
+    .refresh-btn svg {
+      width: 16px;
+      height: 16px;
+      transition: transform 0.5s;
+    }
+
+    .refresh-btn.spinning svg {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .main-content {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 16px;
+      min-height: 0;
+      overflow: hidden;
+      height: calc(100vh - 80px);
+      position: relative;
+      padding-left: 16px;
+    }
+
+    @media (max-width: 768px) {
+      .main-content {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 12px;
+        height: calc(100vh - 70px);
+        padding-left: 12px;
+      }
+    }
+
+    /* 菜单按钮 - 在header中 */
+    .menu-toggle-btn {
+      width: 40px;
+      height: 40px;
+      background: transparent;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: all 0.3s;
+      flex-shrink: 0;
+    }
+
+    .menu-toggle-btn:hover {
+      background: #f3f4f6;
+      transform: scale(1.05);
+    }
+
+    .dark .menu-toggle-btn {
+      border-color: #3f4045;
+    }
+
+    .dark .menu-toggle-btn:hover {
+      background: #374151;
+    }
+
+    /* 侧边栏 - 默认隐藏，打开时浮在内容上方 */
+    .sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 280px;
+      height: 100vh;
+      background: white;
+      border-right: 1px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 16px;
+      overflow-y: auto;
+      z-index: 250;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .sidebar.open {
+      transform: translateX(0);
+    }
+
+    .dark .sidebar {
+      background: #1f2937;
+      border-color: #3f4045;
+    }
+
+    /* 侧边栏遮罩 - 点击关闭 */
+    .sidebar-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 240;
+      display: none;
+    }
+
+    .sidebar-overlay.open {
+      display: block;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: #e5e7eb;
+      border-radius: 10px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: #3b82f6;
+    }
+
+    .dark .sidebar::-webkit-scrollbar-thumb {
+      background: #4a4b50;
+    }
+
+    .glass-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+      border: 1px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.3s;
+    }
+
+    .glass-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .dark .glass-card {
+      background: #2a2b2e;
+      border-color: #3f4045;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .dark .glass-card:hover {
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-header {
+      padding: 16px;
+      border-bottom: 1px solid #f3f4f6;
+      font-weight: 600;
+      font-size: 14px;
+      color: #1f2937;
+    }
+
+    .dark .card-header {
+      border-color: #3f4045;
+      color: #e5e7eb;
+    }
+
+    .card-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .card-content::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .card-content::-webkit-scrollbar-thumb {
+      background: #e5e7eb;
+      border-radius: 10px;
+    }
+
+    .card-content::-webkit-scrollbar-thumb:hover {
+      background: #3b82f6;
+    }
+
+    .dark .card-content::-webkit-scrollbar-thumb {
+      background: #4a4b50;
+    }
+
+    .group-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      justify-content: flex-start;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #f3f4f6;
+      margin-bottom: 8px;
+      background: #fff;
+      transition: all 0.3s;
+    }
+
+    .dark .group-item {
+      background: #374151;
+      border-color: #3f4045;
+    }
+
+    .group-item:hover {
+      border-color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .group-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .group-name {
+      font-weight: 500;
+      color: #1f2937;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dark .group-name {
+      color: #e5e7eb;
+    }
+
+    .group-id {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+
+    .dark .group-id {
+      color: #6b7280;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 48px;
+      height: 24px;
+      margin-left: 12px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: #d1d5db;
+      transition: background-color 0.35s, box-shadow 0.3s;
+      border-radius: 24px;
+    }
+
+    .toggle-slider:hover {
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
+    }
+
+    .dark .toggle-slider {
+      background-color: #4a4b50;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: transform 0.35s;
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    input:checked + .toggle-slider {
+      background-color: #3b82f6;
+    }
+
+    input:checked + .toggle-slider:before {
+      transform: translateX(24px);
+    }
+
+    .bulk-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #f3f4f6;
+    }
+
+    .dark .bulk-actions {
+      border-color: #3f4045;
+    }
+
+    .bulk-btn {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #e5e7eb;
+      background: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.3s;
+      color: #1f2937;
+    }
+
+    .dark .bulk-btn {
+      background: #374151;
+      border-color: #4a4b50;
+      color: #e5e7eb;
+    }
+
+    .bulk-btn:hover {
+      background: #f3f4f6;
+      border-color: #3b82f6;
+      color: #3b82f6;
+    }
+
+    .dark .bulk-btn:hover {
+      background: #4a4b50;
+      border-color: #3b82f6;
+      color: #3b82f6;
+    }
+
+    .bulk-btn:active {
+      transform: scale(0.95);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 32px 16px;
+      color: #9ca3af;
+    }
+
+    .dark .empty-state {
+      color: #6b7280;
+    }
+
+    .empty-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 100;
+    }
+
+    .toast {
+      padding: 12px 24px;
+      border-radius: 8px;
+      color: white;
+      margin-bottom: 8px;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: toastIn 0.3s ease-out;
+    }
+
+    .toast.success {
+      background: #10b981;
+    }
+
+    .toast.error {
+      background: #ef4444;
+    }
+
+    .toast.info {
+      background: #3b82f6;
+    }
+
+    @keyframes toastIn {
+      from {
+        opacity: 0;
+        transform: translateX(100%);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .main-area {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+      border: 1px solid #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #9ca3af;
+    }
+
+    .dark .main-area {
+      background: #2a2b2e;
+      border-color: #3f4045;
+      color: #6b7280;
+    }
+
+    /* 导航菜单项 - 圆角长方形按钮 */
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      cursor: pointer;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      transition: all 0.3s;
+      color: #6b7280;
+      font-weight: 500;
+      background: white;
+      margin-bottom: 8px;
+    }
+
+    .nav-item:hover {
+      background: #f3f4f6;
+      color: #3b82f6;
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    }
+
+    .dark .nav-item {
+      background: #374151;
+      border-color: #4a4b50;
+      color: #e5e7eb;
+    }
+
+    .dark .nav-item:hover {
+      background: #4a4b50;
+      color: #3b82f6;
+      border-color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .nav-item.active {
+      background: #eff6ff;
+      border-color: #3b82f6;
+      color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    }
+
+    .dark .nav-item.active {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+      color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    /* 页面内容 */
+    .page-content {
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .page-content.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .page-content .glass-card {
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .page-content .glass-card > div:last-child {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    /* 公告卡片样式 */
+    .announcement-card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      overflow: hidden;
+      transition: all 0.3s;
+      cursor: pointer;
+    }
+
+    .dark .announcement-card {
+      background: #374151;
+      border-color: #4a4b50;
+    }
+
+    .announcement-card:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .dark .announcement-card:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .announcement-header {
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .dark .announcement-header {
+      background: #2a2b2e;
+      border-color: #3f4045;
+    }
+
+    .announcement-header.prerelease {
+      background: #fef3c7;
+    }
+
+    .dark .announcement-header.prerelease {
+      background: #78350f;
+    }
+
+    .announcement-header.release {
+      background: #d1fae5;
+    }
+
+    .dark .announcement-header.release {
+      background: #064e3b;
+    }
+
+    .announcement-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .announcement-version {
+      font-weight: 600;
+      font-size: 14px;
+      color: #1f2937;
+      margin-bottom: 4px;
+    }
+
+    .dark .announcement-version {
+      color: #e5e7eb;
+    }
+
+    .announcement-header.prerelease .announcement-version {
+      color: #92400e;
+    }
+
+    .dark .announcement-header.prerelease .announcement-version {
+      color: #fcd34d;
+    }
+
+    .announcement-header.release .announcement-version {
+      color: #065f46;
+    }
+
+    .dark .announcement-header.release .announcement-version {
+      color: #6ee7b7;
+    }
+
+    .announcement-time {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    .dark .announcement-time {
+      color: #6b7280;
+    }
+
+    .announcement-header.prerelease .announcement-time {
+      color: #b45309;
+    }
+
+    .dark .announcement-header.prerelease .announcement-time {
+      color: #fbbf24;
+    }
+
+    .announcement-header.release .announcement-time {
+      color: #047857;
+    }
+
+    .dark .announcement-header.release .announcement-time {
+      color: #5eead4;
+    }
+
+    .announcement-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .announcement-badge.prerelease {
+      background: #fbbf24;
+      color: #78350f;
+    }
+
+    .announcement-badge.release {
+      background: #6ee7b7;
+      color: #065f46;
+    }
+
+    .announcement-header.priority {
+      background: #fee2e2;
+      border-bottom: 1px solid #ef4444;
+      justify-content: center;
+    }
+
+    .dark .announcement-header.priority {
+      background: #7f1d1d;
+      border-color: #dc2626;
+    }
+
+    .announcement-version.priority {
+      color: #991b1b;
+    }
+
+    .dark .announcement-version.priority {
+      color: #fca5a5;
+    }
+
+    .announcement-time.priority {
+      color: #b91c1c;
+    }
+
+    .dark .announcement-time.priority {
+      color: #fecaca;
+    }
+
+    .announcement-badge.priority {
+      background: #ef4444;
+      color: white;
+    }
+
+    .announcement-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .announcement-card.expanded .announcement-content {
+      max-height: 500px;
+    }
+
+    .announcement-body {
+      padding: 16px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+      color: #1f2937;
+      line-height: 1.6;
+    }
+
+    .dark .announcement-body {
+      color: #e5e7eb;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header -->
+    <header>
+      <button class="menu-toggle-btn" id="menuToggleBtn" onclick="toggleSidebar()" style="position: relative; left: auto; top: auto; margin-right: 16px;">
+        <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+      </button>
+      <div class="header-title">MKbot插件</div>
+      <button class="refresh-btn" id="refreshBtn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        </svg>
+        刷新
+      </button>
+    </header>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- 侧边栏遮罩 -->
+      <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+      <!-- Sidebar Navigation -->
+      <div class="sidebar" id="sidebar">
+        <div class="nav-item" onclick="switchPage('announcement'); closeSidebar();">
+          <span>更新公告</span>
+        </div>
+        <div class="nav-item" onclick="switchPage('settings'); closeSidebar();">
+          <span>基础设置</span>
+        </div>
+        <div class="nav-item" onclick="switchPage('group-switch'); closeSidebar();">
+          <span>开关管理</span>
+        </div>
+      </div>
+
+      <!-- Main Area - Group Switch Page -->
+      <div id="page-group-switch" class="page-content">
+        <div class="glass-card" style="height: 100%; display: flex; flex-direction: column;">
+          <div style="padding: 16px; border-bottom: 1px solid #f3f4f6;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 16px;">
+              <button class="bulk-btn" id="enableAllBtn" style="padding: 8px 12px; font-size: 12px; white-space: nowrap; flex: 1;">全部开启</button>
+              <div style="font-weight: 600; font-size: 16px; color: #1f2937; cursor: pointer; padding: 0 8px; transition: all 0.3s;" onclick="switchPage('group-switch');">群聊开关</div>
+              <div style="color: #d1d5db; font-size: 16px;">|</div>
+              <div style="font-weight: 600; font-size: 16px; color: #9ca3af; cursor: pointer; padding: 0 8px; transition: all 0.3s;" onclick="switchPage('friend-list');">好友开关</div>
+              <button class="bulk-btn" id="disableAllBtn" style="padding: 8px 12px; font-size: 12px; white-space: nowrap; flex: 1;">全部关闭</button>
+            </div>
+            <input type="text" id="group-search" placeholder="搜索群名或群号..." 
+              style="width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.3s;"
+              oninput="filterGroups()"
+              onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';"
+              onblur="this.style.borderColor='#e5e7eb'; this.style.boxShadow='none';">
+          </div>
+          
+          <div style="flex: 1; overflow-y: auto; padding: 16px; background: #f9fafb;">
+            <!-- 加载中 -->
+            <div id="groups-loading" style="text-align: center; padding: 32px 16px;">
+              <div style="font-size: 14px; color: #9ca3af;">加载中...</div>
+            </div>
+
+            <!-- 群列表容器 -->
+            <div id="groups-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px;">
+              <!-- 动态生成 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div id="groups-empty" style="text-align: center; padding: 32px 16px; display: none;">
+              <div style="font-size: 14px; color: #9ca3af;">暂无群聊</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Area - Friend List Page -->
+      <div id="page-friend-list" class="page-content">
+        <div class="glass-card" style="height: 100%; display: flex; flex-direction: column;">
+          <div style="padding: 16px; border-bottom: 1px solid #f3f4f6;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 16px;">
+              <button class="bulk-btn" id="enableAllFriendsBtn" style="padding: 8px 12px; font-size: 12px; white-space: nowrap; flex: 1;">全部开启</button>
+              <div style="font-weight: 600; font-size: 16px; color: #9ca3af; cursor: pointer; padding: 0 8px; transition: all 0.3s;" onclick="switchPage('group-switch');">群聊开关</div>
+              <div style="color: #d1d5db; font-size: 16px;">|</div>
+              <div style="font-weight: 600; font-size: 16px; color: #1f2937; cursor: pointer; padding: 0 8px; transition: all 0.3s;" onclick="switchPage('friend-list');">好友开关</div>
+              <button class="bulk-btn" id="disableAllFriendsBtn" style="padding: 8px 12px; font-size: 12px; white-space: nowrap; flex: 1;">全部关闭</button>
+            </div>
+            <input type="text" id="friend-search" placeholder="搜索好友昵称或QQ..." 
+              style="width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.3s;"
+              oninput="filterFriends()"
+              onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';"
+              onblur="this.style.borderColor='#e5e7eb'; this.style.boxShadow='none';">
+          </div>
+          
+          <div style="flex: 1; overflow-y: auto; padding: 16px; background: #f9fafb;">
+            <!-- 加载中 -->
+            <div id="friends-loading" style="text-align: center; padding: 32px 16px;">
+              <div style="font-size: 14px; color: #9ca3af;">加载中...</div>
+            </div>
+
+            <!-- 好友列表容器 -->
+            <div id="friends-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px;">
+              <!-- 动态生成 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div id="friends-empty" style="text-align: center; padding: 32px 16px; display: none;">
+              <div style="font-size: 14px; color: #9ca3af;">暂无好友</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Area - Settings Page -->
+      <div id="page-settings" class="page-content">
+        <div class="glass-card" style="height: 100%; display: flex; flex-direction: column;">
+          <div style="padding: 16px; border-bottom: 1px solid #f3f4f6;">
+            <div style="font-weight: 600; font-size: 18px; color: #1f2937;">基础设置</div>
+          </div>
+          
+          <div style="flex: 1; overflow-y: auto; padding: 16px; background: #f9fafb;">
+            <!-- 主人 QQ 设置 -->
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+              <div style="font-weight: 600; font-size: 14px; color: #1f2937; margin-bottom: 8px;">主人 QQ</div>
+              <input type="text" id="ownerQQsInput" placeholder="多个 QQ 用逗号分隔，如：123456,789012" 
+                style="width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.3s; box-sizing: border-box;"
+                onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';"
+                onblur="this.style.borderColor='#e5e7eb'; this.style.boxShadow='none';">
+              <div style="font-size: 12px; color: #9ca3af; margin-top: 8px;">支持多种分隔符：逗号、中文逗号、空格、&、|</div>
+            </div>
+
+            <!-- 非主人回复开关 -->
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 600; font-size: 14px; color: #1f2937; margin-bottom: 4px;">非主人回复开关</div>
+                  <div style="font-size: 12px; color: #9ca3af;">启用后，非主人消息会触发回复</div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="nowoner" onchange="saveSettings()">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 非主人回复内容 -->
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+              <div style="font-weight: 600; font-size: 14px; color: #1f2937; margin-bottom: 8px;">非主人回复内容</div>
+              <textarea id="nowonernrInput" placeholder="输入非主人消息的回复内容" 
+                style="width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.3s; box-sizing: border-box; min-height: 80px; resize: vertical; font-family: inherit;"
+                onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';"
+                onblur="this.style.borderColor='#e5e7eb'; this.style.boxShadow='none';"></textarea>
+            </div>
+
+            <!-- 测试功能开关 -->
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 600; font-size: 14px; color: #1f2937; margin-bottom: 4px;">测试功能</div>
+                  <div style="font-size: 12px; color: #9ca3af;">该功能需配搭puppeteer插件使用，可在插件商店进行下载</div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="csOf" onchange="saveSettings()">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 保存按钮 -->
+            <div style="display: flex; gap: 8px;">
+              <button class="bulk-btn" id="saveSettingsBtn" style="padding: 10px 16px; font-size: 14px; flex: 1; background: #3b82f6; color: white; border: none; cursor: pointer;" onclick="saveSettings()">保存设置</button>
+              <button class="bulk-btn" id="resetSettingsBtn" style="padding: 10px 16px; font-size: 14px; flex: 1;" onclick="loadSettings()">重置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Area - Announcement Page -->
+      <div id="page-announcement" class="page-content">
+        <div class="glass-card" style="height: 100%; display: flex; flex-direction: column;">
+          <div style="padding: 16px; border-bottom: 1px solid #f3f4f6; text-align: center;">
+            <div style="font-weight: 600; font-size: 18px; color: #1f2937;">更新公告</div>
+          </div>
+          
+          <div style="flex: 1; overflow-y: auto; padding: 16px; background: #f9fafb;">
+            <!-- 加载中 -->
+            <div id="announcement-loading" style="text-align: center; padding: 32px 16px;">
+              <div style="font-size: 14px; color: #9ca3af;">加载中...</div>
+            </div>
+            
+            <!-- 公告列表 -->
+            <div id="announcement-list" style="display: none; gap: 12px; display: flex; flex-direction: column;"></div>
+            
+            <!-- 空状态 -->
+            <div id="announcement-empty" style="text-align: center; padding: 32px 16px; display: none;">
+              <div style="font-size: 14px; color: #9ca3af;">暂无公告</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 调试面板 -->
+    <div id="debugPanel" style="position: fixed; bottom: 20px; right: 20px; background: white; border: 1px solid #ccc; border-radius: 8px; padding: 16px; max-width: 400px; max-height: 300px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; display: none;">
+      <div style="font-weight: bold; margin-bottom: 8px;">调试信息</div>
+      <div id="debugContent" style="font-size: 12px; font-family: monospace; white-space: pre-wrap; word-break: break-all;"></div>
+      <button onclick="document.getElementById('debugPanel').style.display='none'" style="margin-top: 8px; padding: 4px 8px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">关闭</button>
+    </div>
+    
+    <!-- 神秘数字悬浮窗 -->
+    <div id="secretNumberPanel" style="position: fixed; bottom: 80px; right: 20px; background: white; border: 2px solid #3b82f6; border-radius: 12px; padding: 16px; width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 1000; display: none;">
+      <div style="font-weight: 600; margin-bottom: 12px; color: #1f2937; font-size: 14px;">神秘数字设置</div>
+      <input type="text" id="secretNumberFloatInput" placeholder="输入神秘数字" 
+        style="width: 100%; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.3s; box-sizing: border-box; margin-bottom: 12px;"
+        onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';"
+        onblur="this.style.borderColor='#e5e7eb'; this.style.boxShadow='none';">
+      <div style="display: flex; gap: 8px;">
+        <button style="flex: 1; padding: 8px 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.3s;" onclick="saveSecretNumber()" onmouseover="this.style.background='#2563eb';" onmouseout="this.style.background='#3b82f6';">保存</button>
+        <button style="flex: 1; padding: 8px 12px; background: #e5e7eb; color: #1f2937; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.3s;" onclick="closeSecretNumberPanel()" onmouseover="this.style.background='#d1d5db';" onmouseout="this.style.background='#e5e7eb';">关闭</button>
+      </div>
+    </div>
+    
+    <!-- 调试开关按钮 -->
+    <button id="debugToggleBtn" style="position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; padding: 0; background: transparent; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 24px; z-index: 999; display: flex; align-items: center; justify-content: center; transition: all 0.3s;" onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 0 8px rgba(0,0,0,0.3))';" onmouseout="this.style.transform='scale(1)'; this.style.filter='none';">🐛</button>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    const ROUTE_PREFIX = '/mkbot';
+    const CONFIG_KEY = 'group_of';
+    const FRIEND_CONFIG_KEY = 'haoyou_of';
+    // 从 localStorage 获取 token（NapCat WebUI 鉴权方式）
+    const token = localStorage.getItem('token') || '';
+    let groupList = [];
+    let enabledGroups = [];
+    let friendList = [];
+    let enabledFriends = [];
+
+    // 获取授权请求头
+    function authHeaders(h = {}) {
+      if (token) h['Authorization'] = 'Bearer ' + token;
+      return h;
+    }
+
+    // 调试输出
+    function debug(msg) {
+      console.log(msg);
+      const panel = document.getElementById('debugPanel');
+      const content = document.getElementById('debugContent');
+      if (panel && content) {
+        // 不自动显示面板，只记录内容
+        content.textContent += msg + '\n';
+        content.scrollTop = content.scrollHeight;
+      }
+    }
+
+    // 获取 API 基础路径
+    async function resolveApiBase() {
+      debug('=== 开始解析 API 基础路径 ===');
+      debug('webui_token: ' + (token ? '已获取' : '未获取'));
+      debug('window.__PLUGIN_NAME__: ' + window.__PLUGIN_NAME__);
+      debug('location.pathname: ' + location.pathname);
+      
+      const tries = [];
+      if (window.__PLUGIN_NAME__) tries.push(window.__PLUGIN_NAME__);
+      try {
+        if (window.parent && window.parent.__PLUGIN_NAME__) tries.push(window.parent.__PLUGIN_NAME__);
+      } catch (e) { }
+
+      const extMatch = location.pathname.match(/\/ext\/([^\/]+)/);
+      if (extMatch) {
+        debug('从 URL 提取插件名: ' + extMatch[1]);
+        tries.unshift(extMatch[1]);
+      }
+
+      // 默认兜底
+      tries.push('napcat-plugin-mkbot');
+
+      debug('尝试的插件名列表: ' + JSON.stringify([...new Set(tries.filter(Boolean))]));
+
+      for (const name of [...new Set(tries.filter(Boolean))]) {
+        const base = '/api/Plugin/ext/' + name;
+        debug('尝试路径: ' + base + ROUTE_PREFIX + '/config');
+        try {
+          const r = await fetch(base + ROUTE_PREFIX + '/config', { headers: authHeaders() });
+          debug('响应状态: ' + r.status);
+          if (r.ok) {
+            debug('[OK] 找到 API 基础路径: ' + base);
+            return base;
+          }
+        } catch (e) {
+          debug('[ERROR] 尝试失败: ' + e.message);
+        }
+      }
+      const fallback = '/api/Plugin/ext/' + (window.__PLUGIN_NAME__ || 'napcat-plugin-mkbot');
+      debug('使用兜底路径: ' + fallback);
+      return fallback;
+    }
+
+    // 调用 API
+    async function apiCall(path, options = {}) {
+      const url = API_BASE + ROUTE_PREFIX + path;
+      debug('[API] 调用: ' + url);
+      debug('方法: ' + (options.method || 'GET'));
+      
+      try {
+        const res = await fetch(url, {
+          ...options,
+          headers: { 'Content-Type': 'application/json', ...options.headers, ...authHeaders() }
+        });
+        
+        debug('响应状态: ' + res.status);
+        
+        if (!res.ok) {
+          const text = await res.text();
+          debug('[ERROR] 错误响应: ' + text);
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        
+        const data = await res.json();
+        debug('[OK] 响应数据: ' + JSON.stringify(data));
+        return data;
+      } catch (error) {
+        debug('[ERROR] API 调用失败: ' + error.message);
+        throw error;
+      }
+    }
+
+    // 初始化
+    async function init() {
+      try {
+        debug('=== 开始初始化 ===');
+        API_BASE = await resolveApiBase();
+        debug('API 基础路径已设置: ' + API_BASE);
+        
+        debug('加载配置...');
+        await loadConfig();
+        
+        debug('获取群聊列表...');
+        await fetchGroupList();
+        
+        debug('渲染群聊列表...');
+        renderGroupList();
+        
+        debug('[OK] 初始化完成');
+      } catch (error) {
+        debug('[ERROR] 初始化失败: ' + error.message);
+        showToast('初始化失败: ' + error.message, 'error');
+      }
+    }
+
+    // 加载配置
+    async function loadConfig() {
+      try {
+        debug('[LOAD] 加载配置...');
+        const data = await apiCall('/config');
+        enabledGroups = data.data?.group_of || [];
+        enabledFriends = data.data?.haoyou_of || [];
+        debug('[OK] 配置加载成功，启用的群聊: ' + JSON.stringify(enabledGroups));
+        debug('[OK] 配置加载成功，启用的好友: ' + JSON.stringify(enabledFriends));
+      } catch (error) {
+        debug('[ERROR] 加载配置失败: ' + error.message);
+        showToast('加载配置失败: ' + error.message, 'error');
+        enabledGroups = [];
+        enabledFriends = [];
+      }
+    }
+
+    // 获取群聊列表
+    async function fetchGroupList() {
+      try {
+        debug('[LOAD] 获取群聊列表...');
+        const data = await apiCall('/groups');
+        groupList = data.data?.groups || [];
+        debug('[OK] 群聊列表加载成功，共 ' + groupList.length + ' 个群聊');
+        debug('群聊数据: ' + JSON.stringify(groupList));
+      } catch (error) {
+        debug('[ERROR] 获取群聊列表失败: ' + error.message);
+        showToast('获取群聊列表失败: ' + error.message, 'error');
+        groupList = [];
+      }
+    }
+
+    // 获取好友列表
+    async function fetchFriendList() {
+      try {
+        debug('[LOAD] 获取好友列表...');
+        const data = await apiCall('/friends');
+        friendList = data.data?.friends || [];
+        debug('[OK] 好友列表加载成功，共 ' + friendList.length + ' 个好友');
+        debug('好友数据: ' + JSON.stringify(friendList));
+      } catch (error) {
+        debug('[ERROR] 获取好友列表失败: ' + error.message);
+        showToast('获取好友列表失败: ' + error.message, 'error');
+        friendList = [];
+      }
+    }
+
+    // 渲染群聊列表
+    function renderGroupList() {
+      const container = document.getElementById('groups-container');
+      const empty = document.getElementById('groups-empty');
+      const loading = document.getElementById('groups-loading');
+      
+      loading.style.display = 'none';
+      
+      if (groupList.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      container.style.display = 'grid';
+      empty.style.display = 'none';
+
+      container.innerHTML = groupList.map(group => {
+        const isEnabled = enabledGroups.includes(String(group.group_id));
+        const avatarUrl = `http://p.qlogo.cn/gh/${group.group_id}/${group.group_id}/100/`;
+        const groupName = (group.group_name || '未知群聊').substring(0, 10);
+        return `
+          <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; transition: all 0.3s; cursor: pointer; display: flex; flex-direction: column; align-items: center; text-align: center;"
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.2)'; this.style.borderColor='#3b82f6'; this.style.transform='translateY(-2px)';"
+            onmouseout="this.style.boxShadow='none'; this.style.borderColor='#e5e7eb'; this.style.transform='translateY(0)';">
+            <div style="width: 50px; height: 50px; border-radius: 8px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 8px;">
+              <img src="${avatarUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.parentElement.innerHTML='${(group.group_name || 'G')[0]}';">
+            </div>
+            <div style="flex: 1; min-width: 0; margin-bottom: 8px; width: 100%;">
+              <div style="font-weight: 500; color: #1f2937; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${groupName}${group.group_name && group.group_name.length > 10 ? '...' : ''}</div>
+              <div style="font-size: 11px; color: #9ca3af; margin-top: 2px; font-family: monospace;">${group.group_id}</div>
+            </div>
+            <label class="toggle-switch" style="flex-shrink: 0;">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleGroup('${group.group_id}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 过滤群聊列表
+    function filterGroups() {
+      const searchInput = document.getElementById('group-search');
+      const filter = searchInput.value.trim().toLowerCase();
+      const container = document.getElementById('groups-container');
+      const empty = document.getElementById('groups-empty');
+      
+      if (groupList.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      const filtered = filter ? groupList.filter(g => 
+        (g.group_name || '').toLowerCase().includes(filter) || 
+        String(g.group_id).includes(filter)
+      ) : groupList;
+
+      if (filtered.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        empty.innerHTML = '<div style="font-size: 14px; color: #9ca3af;">未找到匹配的群聊</div>';
+        return;
+      }
+
+      container.style.display = 'grid';
+      empty.style.display = 'none';
+
+      container.innerHTML = filtered.map(group => {
+        const isEnabled = enabledGroups.includes(String(group.group_id));
+        const avatarUrl = `http://p.qlogo.cn/gh/${group.group_id}/${group.group_id}/100/`;
+        const groupName = (group.group_name || '未知群聊').substring(0, 10);
+        return `
+          <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; transition: all 0.3s; cursor: pointer; display: flex; flex-direction: column; align-items: center; text-align: center;"
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.2)'; this.style.borderColor='#3b82f6'; this.style.transform='translateY(-2px)';"
+            onmouseout="this.style.boxShadow='none'; this.style.borderColor='#e5e7eb'; this.style.transform='translateY(0)';">
+            <div style="width: 50px; height: 50px; border-radius: 8px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 8px;">
+              <img src="${avatarUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.parentElement.innerHTML='${(group.group_name || 'G')[0]}';">
+            </div>
+            <div style="flex: 1; min-width: 0; margin-bottom: 8px; width: 100%;">
+              <div style="font-weight: 500; color: #1f2937; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${groupName}${group.group_name && group.group_name.length > 10 ? '...' : ''}</div>
+              <div style="font-size: 11px; color: #9ca3af; margin-top: 2px; font-family: monospace;">${group.group_id}</div>
+            </div>
+            <label class="toggle-switch" style="flex-shrink: 0;">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleGroup('${group.group_id}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 切换群聊开关
+    async function toggleGroup(groupId, enabled) {
+      const index = enabledGroups.indexOf(String(groupId));
+      
+      if (enabled && index === -1) {
+        enabledGroups.push(String(groupId));
+      } else if (!enabled && index !== -1) {
+        enabledGroups.splice(index, 1);
+      }
+
+      await saveConfig();
+      showToast(`群聊 ${groupId} 已${enabled ? '开启' : '关闭'}`, 'success');
+    }
+
+    // 全部开启
+    async function enableAll() {
+      enabledGroups = groupList.map(g => String(g.group_id));
+      await saveConfig();
+      renderGroupList();
+      showToast('已全部开启', 'success');
+    }
+
+    // 全部关闭
+    async function disableAll() {
+      enabledGroups = [];
+      await saveConfig();
+      renderGroupList();
+      showToast('已全部关闭', 'success');
+    }
+
+    // 保存配置
+    async function saveConfig() {
+      try {
+        debug('[SAVE] 保存配置: ' + JSON.stringify({ [CONFIG_KEY]: enabledGroups, [FRIEND_CONFIG_KEY]: enabledFriends }));
+        const data = await apiCall('/config', {
+          method: 'POST',
+          body: JSON.stringify({ [CONFIG_KEY]: enabledGroups, [FRIEND_CONFIG_KEY]: enabledFriends })
+        });
+        debug('[OK] 配置保存成功');
+      } catch (error) {
+        debug('[ERROR] 保存配置失败: ' + error.message);
+        showToast('保存配置失败: ' + error.message, 'error');
+      }
+    }
+
+    // 刷新
+    async function refresh() {
+      const btn = document.getElementById('refreshBtn');
+      btn.classList.add('spinning');
+      debug('[REFRESH] 开始刷新...');
+      
+      try {
+        await fetchGroupList();
+        await loadConfig();
+        renderGroupList();
+        debug('[OK] 刷新成功');
+        showToast('刷新成功', 'success');
+      } catch (error) {
+        debug('[ERROR] 刷新失败: ' + error.message);
+        showToast('刷新失败: ' + error.message, 'error');
+      } finally {
+        btn.classList.remove('spinning');
+      }
+    }
+
+    // 显示提示
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.remove();
+      }, 3000);
+    }
+
+    // 渲染好友列表
+    function renderFriendList() {
+      const container = document.getElementById('friends-container');
+      const empty = document.getElementById('friends-empty');
+      const loading = document.getElementById('friends-loading');
+      
+      loading.style.display = 'none';
+      
+      if (friendList.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      container.style.display = 'grid';
+      container.style.gridTemplateColumns = 'repeat(auto-fill, minmax(150px, 1fr))';
+      container.style.gap = '12px';
+      empty.style.display = 'none';
+
+      container.innerHTML = friendList.map(friend => {
+        const isEnabled = enabledFriends.includes(String(friend.user_id));
+        const avatarUrl = `http://q.qlogo.cn/headimg_dl?dst_uin=${friend.user_id}&spec=640`;
+        const friendName = (friend.nickname || '未知好友').substring(0, 10);
+        return `
+          <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; transition: all 0.3s; cursor: pointer; display: flex; flex-direction: column; align-items: center; text-align: center;"
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.2)'; this.style.borderColor='#3b82f6'; this.style.transform='translateY(-2px)';"
+            onmouseout="this.style.boxShadow='none'; this.style.borderColor='#e5e7eb'; this.style.transform='translateY(0)';">
+            <div style="width: 50px; height: 50px; border-radius: 8px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 8px;">
+              <img src="${avatarUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.parentElement.innerHTML='${(friend.nickname || 'F')[0]}';">
+            </div>
+            <div style="flex: 1; min-width: 0; margin-bottom: 8px; width: 100%;">
+              <div style="font-weight: 500; color: #1f2937; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${friendName}${friend.nickname && friend.nickname.length > 10 ? '...' : ''}</div>
+              <div style="font-size: 11px; color: #9ca3af; margin-top: 2px; font-family: monospace;">${friend.user_id}</div>
+            </div>
+            <label class="toggle-switch" style="flex-shrink: 0;">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleFriend('${friend.user_id}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 过滤好友列表
+    function filterFriends() {
+      const searchInput = document.getElementById('friend-search');
+      const filter = searchInput.value.trim().toLowerCase();
+      const container = document.getElementById('friends-container');
+      const empty = document.getElementById('friends-empty');
+      
+      if (friendList.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      const filtered = filter ? friendList.filter(f => 
+        (f.nickname || '').toLowerCase().includes(filter) || 
+        String(f.user_id).includes(filter)
+      ) : friendList;
+
+      if (filtered.length === 0) {
+        container.style.display = 'none';
+        empty.style.display = 'block';
+        empty.innerHTML = '<div style="font-size: 14px; color: #9ca3af;">未找到匹配的好友</div>';
+        return;
+      }
+
+      container.style.display = 'grid';
+      empty.style.display = 'none';
+
+      container.innerHTML = filtered.map(friend => {
+        const isEnabled = enabledFriends.includes(String(friend.user_id));
+        const avatarUrl = `http://q.qlogo.cn/headimg_dl?dst_uin=${friend.user_id}&spec=640`;
+        const friendName = (friend.nickname || '未知好友').substring(0, 10);
+        return `
+          <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; transition: all 0.3s; cursor: pointer; display: flex; flex-direction: column; align-items: center; text-align: center;"
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.2)'; this.style.borderColor='#3b82f6'; this.style.transform='translateY(-2px)';"
+            onmouseout="this.style.boxShadow='none'; this.style.borderColor='#e5e7eb'; this.style.transform='translateY(0)';">
+            <div style="width: 50px; height: 50px; border-radius: 8px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 8px;">
+              <img src="${avatarUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.parentElement.innerHTML='${(friend.nickname || 'F')[0]}';">
+            </div>
+            <div style="flex: 1; min-width: 0; margin-bottom: 8px; width: 100%;">
+              <div style="font-weight: 500; color: #1f2937; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${friendName}${friend.nickname && friend.nickname.length > 10 ? '...' : ''}</div>
+              <div style="font-size: 11px; color: #9ca3af; margin-top: 2px; font-family: monospace;">${friend.user_id}</div>
+            </div>
+            <label class="toggle-switch" style="flex-shrink: 0;">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleFriend('${friend.user_id}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 切换好友开关
+    async function toggleFriend(friendId, enabled) {
+      const index = enabledFriends.indexOf(String(friendId));
+      
+      if (enabled && index === -1) {
+        enabledFriends.push(String(friendId));
+      } else if (!enabled && index !== -1) {
+        enabledFriends.splice(index, 1);
+      }
+
+      await saveFriendConfig();
+      showToast(`好友 ${friendId} 已${enabled ? '开启' : '关闭'}`, 'success');
+    }
+
+    // 全部开启好友
+    async function enableAllFriends() {
+      enabledFriends = friendList.map(f => String(f.user_id));
+      await saveFriendConfig();
+      renderFriendList();
+      showToast('已全部开启', 'success');
+    }
+
+    // 全部关闭好友
+    async function disableAllFriends() {
+      enabledFriends = [];
+      await saveFriendConfig();
+      renderFriendList();
+      showToast('已全部关闭', 'success');
+    }
+
+    // 保存好友配置
+    async function saveFriendConfig() {
+      try {
+        debug('[SAVE] 保存好友配置: ' + JSON.stringify({ [FRIEND_CONFIG_KEY]: enabledFriends }));
+        const data = await apiCall('/config', {
+          method: 'POST',
+          body: JSON.stringify({ [FRIEND_CONFIG_KEY]: enabledFriends })
+        });
+        debug('[OK] 好友配置保存成功');
+      } catch (error) {
+        debug('[ERROR] 保存好友配置失败: ' + error.message);
+        showToast('保存好友配置失败: ' + error.message, 'error');
+      }
+    }
+
+    // 切换侧边栏
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebarOverlay');
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('open');
+    }
+
+    // 关闭侧边栏
+    function closeSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebarOverlay');
+      sidebar.classList.remove('open');
+      overlay.classList.remove('open');
+    }
+
+    // 切换页面
+    function switchPage(pageId) {
+      debug('切换页面: ' + pageId);
+      
+      // 隐藏所有页面
+      document.querySelectorAll('.page-content').forEach(page => {
+        page.classList.remove('active');
+      });
+      
+      // 移除所有导航项的 active 状态
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      
+      // 显示选中的页面
+      const page = document.getElementById('page-' + pageId);
+      if (page) {
+        page.classList.add('active');
+      }
+      
+      // 更新导航菜单的 active 状态
+      const navItems = document.querySelectorAll('.nav-item');
+      navItems.forEach(item => {
+        const pageLink = item.getAttribute('onclick');
+        if (pageLink && pageLink.includes(`switchPage('${pageId}')`)) {
+          item.classList.add('active');
+        }
+      });
+      
+      // 根据页面类型加载数据
+      if (pageId === 'group-switch') {
+        renderGroupList();
+      } else if (pageId === 'friend-list') {
+        if (friendList.length === 0) {
+          fetchFriendList().then(() => renderFriendList());
+        } else {
+          renderFriendList();
+        }
+      } else if (pageId === 'settings') {
+        loadSettings();
+      } else if (pageId === 'announcement') {
+        loadAnnouncement();
+      }
+    }
+
+    // 加载更新公告
+    async function loadAnnouncement() {
+      try {
+        debug('[LOAD] 加载更新公告...');
+        const loading = document.getElementById('announcement-loading');
+        const list = document.getElementById('announcement-list');
+        const empty = document.getElementById('announcement-empty');
+        
+        loading.style.display = 'block';
+        list.style.display = 'none';
+        empty.style.display = 'none';
+        
+        // 从 config 读取神秘数字
+        let key = '';
+        try {
+          const configData = await apiCall('/config');
+          if (configData && configData.data) {
+            key = configData.data['神秘数字'] || '';
+          }
+        } catch (e) {
+          debug('[WARN] 读取神秘数字失败: ' + e.message);
+        }
+        
+        // 构建 API 调用 URL
+        let apiUrl = '/announcement';
+        if (key) {
+          apiUrl += '?key=' + encodeURIComponent(key);
+        }
+        
+        const data = await apiCall(apiUrl);
+        debug('[OK] 公告加载成功');
+        
+        loading.style.display = 'none';
+        
+        const announcements = data.data || [];
+        if (announcements.length > 0) {
+          list.innerHTML = '';
+          announcements.forEach((item, index) => {
+            const card = createAnnouncementCard(item, index);
+            list.appendChild(card);
+          });
+          list.style.display = 'flex';
+        } else {
+          empty.style.display = 'block';
+        }
+      } catch (error) {
+        debug('[ERROR] 加载公告失败: ' + error.message);
+        loading.style.display = 'none';
+        empty.style.display = 'block';
+      }
+    }
+
+    // 创建公告卡片
+    function createAnnouncementCard(item, index) {
+      const card = document.createElement('div');
+      const isPrerelease = item.isPrerelease;
+      const isPriority = item.isPriority;
+      let type = isPrerelease ? 'prerelease' : 'release';
+      
+      card.className = `announcement-card ${type}${isPriority ? ' priority' : ''}`;
+      
+      if (isPriority) {
+        // 置顶公告：不显示版本号和时间，直接显示内容
+        const headerClass = `announcement-header ${type} priority`;
+        const badgeClass = `announcement-badge priority`;
+        
+        card.innerHTML = `
+          <div class="${headerClass}">
+            <div class="announcement-info">
+              <div class="${badgeClass}">置顶公告</div>
+            </div>
+          </div>
+          <div class="announcement-content">
+            <div class="announcement-body">${escapeHtml(item.content)}</div>
+          </div>
+        `;
+        
+        // 置顶公告默认展开
+        card.classList.add('expanded');
+      } else {
+        // 普通公告：显示版本号和时间
+        const headerClass = `announcement-header ${type}`;
+        const versionClass = `announcement-version`;
+        const timeClass = `announcement-time`;
+        const badgeClass = `announcement-badge ${type}`;
+        
+        // 如果有 URL，添加下载按钮
+        const downloadBtn = item.url ? `
+          <a href="${item.url}" target="_blank" style="
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 14px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s;
+            white-space: nowrap;
+            cursor: pointer;
+            border: none;
+            height: 28px;
+            flex-shrink: 0;
+          " 
+          onmouseover="this.style.background='#2563eb'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.3)';"
+          onmouseout="this.style.background='#3b82f6'; this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+            下载
+          </a>
+        ` : '';
+        
+        card.innerHTML = `
+          <div class="${headerClass}">
+            <div class="announcement-info">
+              <div class="${versionClass}">
+                ${item.version}
+                <span class="${badgeClass}">${isPrerelease ? '测试版' : '正式版'}</span>
+              </div>
+              <div class="${timeClass}">${item.releaseTime || '未知时间'}</div>
+            </div>
+            <div style="flex-shrink: 0; display: flex; align-items: center;">
+              ${downloadBtn}
+            </div>
+          </div>
+          <div class="announcement-content">
+            <div class="announcement-body">${escapeHtml(item.content)}</div>
+          </div>
+        `;
+      }
+      
+      // 只在 header 区域点击时触发折叠（但不包括下载按钮）
+      const header = card.querySelector('.announcement-header');
+      if (header) {
+        header.addEventListener('click', (e) => {
+          // 如果点击的是下载按钮或其子元素，不触发折叠
+          if (e.target.closest('a')) {
+            return;
+          }
+          card.classList.toggle('expanded');
+        });
+        header.style.cursor = 'pointer';
+      }
+      
+      return card;
+    }
+
+    // HTML 转义函数
+    function escapeHtml(text) {
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // 初始化
+    async function initPage() {
+      // 显示第一个页面（更新公告）
+      const firstPage = document.getElementById('page-announcement');
+      if (firstPage) {
+        firstPage.classList.add('active');
+      }
+      const firstNav = document.querySelector('.nav-item');
+      if (firstNav) {
+        firstNav.classList.add('active');
+      }
+      
+      // 显示加载状态
+      document.getElementById('groups-loading').style.display = 'block';
+      document.getElementById('groups-container').style.display = 'none';
+      document.getElementById('groups-empty').style.display = 'none';
+      document.getElementById('friends-loading').style.display = 'none';
+      document.getElementById('friends-container').style.display = 'none';
+      document.getElementById('friends-empty').style.display = 'none';
+      
+      // 初始化数据
+      await init();
+      
+      // 加载公告
+      await loadAnnouncement();
+    }
+
+    // 加载设置
+    async function loadSettings() {
+      try {
+        debug('[LOAD] 加载设置...');
+        const data = await apiCall('/config');
+        const config = data.data || {};
+        
+        // 填充表单
+        document.getElementById('ownerQQsInput').value = Array.isArray(config.OwnerQQs) ? config.OwnerQQs.join(', ') : '';
+        document.getElementById('nowoner').checked = config.nowoner ?? true;
+        document.getElementById('nowonernrInput').value = config.nowonernr ?? '';
+        document.getElementById('csOf').checked = config.cs_of ?? false;
+        
+        debug('[OK] 设置加载成功');
+      } catch (error) {
+        debug('[ERROR] 加载设置失败: ' + error.message);
+        showToast('加载设置失败: ' + error.message, 'error');
+      }
+    }
+
+    // 保存设置
+    async function saveSettings() {
+      try {
+        const ownerQQsStr = document.getElementById('ownerQQsInput').value.trim();
+        const nowoner = document.getElementById('nowoner').checked;
+        const nowonernr = document.getElementById('nowonernrInput').value.trim();
+        const csOf = document.getElementById('csOf').checked;
+        
+        // 解析 QQ 号
+        const qqArray = ownerQQsStr
+          .split(/[,，、\s&|]+/)
+          .map(qq => qq.trim())
+          .filter(qq => qq && /^\d+$/.test(qq));
+        
+        const config = {
+          OwnerQQs: qqArray,
+          nowoner: nowoner,
+          nowonernr: nowonernr,
+          cs_of: csOf
+        };
+        
+        debug('[SAVE] 保存设置: ' + JSON.stringify(config));
+        const data = await apiCall('/config', {
+          method: 'POST',
+          body: JSON.stringify(config)
+        });
+        debug('[OK] 设置保存成功');
+        showToast('设置已保存', 'success');
+      } catch (error) {
+        debug('[ERROR] 保存设置失败: ' + error.message);
+        showToast('保存设置失败: ' + error.message, 'error');
+      }
+    }
+
+    // 长按检测变量
+    let debugButtonPressTimer = null;
+    let debugButtonPressStart = 0;
+
+    // 保存神秘数字
+    async function saveSecretNumber() {
+      try {
+        const secretNumber = document.getElementById('secretNumberFloatInput').value.trim();
+        debug('[SAVE] 保存神秘数字: ' + secretNumber);
+        
+        const config = {
+          '神秘数字': secretNumber
+        };
+        
+        const data = await apiCall('/config', {
+          method: 'POST',
+          body: JSON.stringify(config)
+        });
+        debug('[OK] 神秘数字保存成功');
+        showToast('神秘数字已保存', 'success');
+        closeSecretNumberPanel();
+      } catch (error) {
+        debug('[ERROR] 保存神秘数字失败: ' + error.message);
+        showToast('保存失败: ' + error.message, 'error');
+      }
+    }
+
+    // 关闭神秘数字面板
+    function closeSecretNumberPanel() {
+      const panel = document.getElementById('secretNumberPanel');
+      if (panel) {
+        panel.style.display = 'none';
+      }
+    }
+
+    // 打开神秘数字面板
+    async function openSecretNumberPanel() {
+      try {
+        // 从 config 读取当前的神秘数字
+        const configData = await apiCall('/config');
+        if (configData && configData.data) {
+          const secretNumber = configData.data['神秘数字'] || '';
+          document.getElementById('secretNumberFloatInput').value = secretNumber;
+        }
+      } catch (e) {
+        debug('[WARN] 读取神秘数字失败: ' + e.message);
+      }
+      
+      const panel = document.getElementById('secretNumberPanel');
+      if (panel) {
+        panel.style.display = 'block';
+        document.getElementById('secretNumberFloatInput').focus();
+      }
+    }
+
+    // 调试按钮长按事件处理
+    const debugBtn = document.getElementById('debugToggleBtn');
+    if (debugBtn) {
+      let isLongPress = false;
+
+      debugBtn.addEventListener('mousedown', (e) => {
+        isLongPress = false;
+        debugButtonPressStart = Date.now();
+        debugButtonPressTimer = setTimeout(() => {
+          isLongPress = true;
+          debug('[LONG-PRESS] 检测到长按调试按钮 5 秒');
+          openSecretNumberPanel();
+        }, 5000);
+      });
+
+      debugBtn.addEventListener('mouseup', () => {
+        if (debugButtonPressTimer) {
+          clearTimeout(debugButtonPressTimer);
+          debugButtonPressTimer = null;
+        }
+        // 如果不是长按，则触发单击事件（切换调试面板）
+        if (!isLongPress) {
+          const panel = document.getElementById('debugPanel');
+          if (panel) {
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+          }
+        }
+      });
+
+      debugBtn.addEventListener('mouseleave', () => {
+        if (debugButtonPressTimer) {
+          clearTimeout(debugButtonPressTimer);
+          debugButtonPressTimer = null;
+        }
+      });
+
+      // 触摸设备支持
+      debugBtn.addEventListener('touchstart', (e) => {
+        isLongPress = false;
+        debugButtonPressStart = Date.now();
+        debugButtonPressTimer = setTimeout(() => {
+          isLongPress = true;
+          debug('[LONG-PRESS] 检测到长按调试按钮 5 秒');
+          openSecretNumberPanel();
+        }, 5000);
+      });
+
+      debugBtn.addEventListener('touchend', () => {
+        if (debugButtonPressTimer) {
+          clearTimeout(debugButtonPressTimer);
+          debugButtonPressTimer = null;
+        }
+        // 如果不是长按，则触发单击事件（切换调试面板）
+        if (!isLongPress) {
+          const panel = document.getElementById('debugPanel');
+          if (panel) {
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+          }
+        }
+      });
+
+      debugBtn.addEventListener('touchcancel', () => {
+        if (debugButtonPressTimer) {
+          clearTimeout(debugButtonPressTimer);
+          debugButtonPressTimer = null;
+        }
+      });
+    }
+
+    // 事件监听
+    document.getElementById('refreshBtn').addEventListener('click', refresh);
+    document.getElementById('enableAllBtn').addEventListener('click', enableAll);
+    document.getElementById('disableAllBtn').addEventListener('click', disableAll);
+    document.getElementById('enableAllFriendsBtn').addEventListener('click', enableAllFriends);
+    document.getElementById('disableAllFriendsBtn').addEventListener('click', disableAllFriends);
+
+    initPage();
+  </script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>导航页面</title>
+  <style>
+    body {
+      background: #fef3c7;
+      margin: 0;
+      padding: 20px;
+      font-family: Arial;
+    }
+    .header {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin: 20px 0;
+      text-align: center;
+    }
+    .header h1 {
+      color: #f97316;
+      font-weight: bold;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      margin: 0;
+      font-size: 28px;
+    }
+    .content {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .content-title {
+      text-align: center;
+      color: #f97316;
+      font-weight: bold;
+      font-size: 18px;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #fed7aa;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    .card {
+      background: #fed7aa;
+      border-radius: 8px;
+      padding: 15px;
+    }
+    .card-title {
+      color: #f97316;
+      font-weight: bold;
+      font-size: 14px;
+      margin: 0 0 8px 0;
+      text-align: left;
+    }
+    .card-desc {
+      color: #666;
+      font-size: 12px;
+      margin: 0;
+      text-align: left;
+      line-height: 1.5;
+      height: 3em;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>MK-Bot</h1>
+</div>
+
+<div class="content">
+  <div class="content-title">基础功能</div>
+  <div class="cards">
+    <div class="card">
+      <h3 class="card-title">授权系统</h3>
+      <p class="card-desc">插件授权系统</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">群管系统</h3>
+      <p class="card-desc">仅限于群内使用</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">邀人统计</h3>
+      <p class="card-desc">开启后可记录邀请次数</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">事件管理</h3>
+      <p class="card-desc">各种开关的管理及介绍</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">音乐系统</h3>
+      <p class="card-desc">听歌的，共4种音源，可语音、链接、卡片返回</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">账号设置</h3>
+      <p class="card-desc">配置登录的机器人账号信息的，如头像昵称签名等</p>
+    </div>
+  </div>
+</div>
+
+<div class="content">
+  <div class="content-title">娱乐功能</div>
+  <div class="cards">
+    <div class="card">
+      <h3 class="card-title">签到</h3>
+      <p class="card-desc">每日签到获取奖励</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">我的信息</h3>
+      <p class="card-desc">查看游戏中你的信息</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">银行系统</h3>
+      <p class="card-desc">存钱的，有利润，非常建议把货币存进去</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">漂流瓶</h3>
+      <p class="card-desc">字面意思，不过没有隐私保护，直接公开瓶子主人</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">伪造聊天</h3>
+      <p class="card-desc">目前版本仅支持纯文本伪造</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">群老婆</h3>
+      <p class="card-desc">支持单群或全群</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">排行榜</h3>
+      <p class="card-desc">各种类型的排行名单</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

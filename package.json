@@ -1,0 +1,29 @@
+{
+  "name": "napcat-plugin-mkbot",
+  "plugin": "MK",
+  "version": "2.1.1.alpha.2",
+  "type": "module",
+  "main": "index.mjs",
+  "description": "MK - 综合娱乐插件",
+  "author": "三个句号",
+  "webui": "webui/dashboard.html",
+  "napcat": {
+    "tags": [
+      "娱乐",
+      "群管"
+    ],
+    "minVersion": "4.17.10"
+  },
+  "dependencies": {
+    "napcat-types": "0.0.9"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  },
+  "scripts": {
+    "build": "vite build"
+  }
+}
