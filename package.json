@@ -1,7 +1,7 @@
 {
   "name": "napcat-plugin-mkbot",
   "plugin": "MKbot",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "type": "module",
   "main": "index.mjs",
   "description": "MKbot - 综合娱乐和群管，包含授权系统、群管功能、娱乐系统、系统监控等",
