@@ -1,32 +1,37 @@
 {
   "name": "napcat-plugin-mkbot",
   "plugin": "MKbot",
-  "version": "2.1.2",
+  "version": "2.3.0",
   "type": "module",
   "main": "index.mjs",
-  "description": "MKbot - 综合娱乐和群管，包含授权系统、群管功能、娱乐系统、系统监控等",
+  "description": "MKbot - 综合娱乐和群管（TypeScript 源码工程，对齐 NapCat 官方插件模板构建）",
   "author": "三个句号",
   "license": "MIT",
   "homepage": "https://github.com/tc-404/napcat-plugin-mkbot",
-  "webui": "webui/dashboard.html",
+  "webui": "webui/admin.html",
+  "keywords": ["napcat", "plugin", "mkbot"],
   "napcat": {
-    "tags": [
-      "娱乐",
-      "群管"
-    ],
+    "tags": ["娱乐", "群管"],
     "minVersion": "4.17.10",
     "homepage": "https://github.com/tc-404/napcat-plugin-mkbot"
   },
   "dependencies": {
-    "napcat-types": "0.0.9"
+    "extract-zip": "^2.0.1",
+    "fflate": "^0.8.2",
+    "napcat-types": "0.0.16"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   },
   "devDependencies": {
-    "@rollup/plugin-node-resolve": "^15.2.3",
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^5.0.0"
+    "@rollup/plugin-node-resolve": "^15.3.1",
+    "@types/node": "^20.19.33",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.1"
   },
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "typecheck": "tsc --noEmit"
   }
 }
