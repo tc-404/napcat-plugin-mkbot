@@ -1,8 +1,11 @@
 {
-  "name": "napcat-plugin-mkbot",
+  "name": "kakake-plugin-mkbot",
   "runtime": "mkbot",
   "displayName": "MKbot",
+  "author": "三个句号",
+  "version": "2.3.5.alpha.3",
   "loader": "MKcc",
   "entry": "index.mjs",
-  "compat_layer": "MKcc"
+  "compat_layer": "MKcc",
+  "icon": "assets/chajian.jpg"
 }

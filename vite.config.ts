@@ -4,8 +4,12 @@ import nodeResolve from '@rollup/plugin-node-resolve';
 import { builtinModules } from 'module';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { KAKAKE_PLUGIN_NAME } from './scripts/plugin-constants.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Vite 构建产物目录（与 package.json name 一致，便于直接部署） */
+const OUT_DIR = 'napcat-plugin-mkbot';
 
 const nodeModules = [
   ...builtinModules,
@@ -28,31 +32,45 @@ function copyDirRecursive(src: string, dest: string) {
   }
 }
 
-/**
- * 将 MKbot 运行时需要的静态资源复制到 dist（与官方模板 copyAssets 思路一致，WebUI 为既有 HTML 而非 React 子工程）。
- */
 function copyMkbotAssetsPlugin() {
   return {
     name: 'copy-mkbot-assets',
     writeBundle() {
-      const distDir = resolve(__dirname, 'dist');
+      const outDir = resolve(__dirname, OUT_DIR);
 
       const webuiSrc = resolve(__dirname, 'webui');
       if (fs.existsSync(webuiSrc)) {
-        copyDirRecursive(webuiSrc, resolve(distDir, 'webui'));
-        console.log('[copy-mkbot-assets] webui/ → dist/webui');
+        copyDirRecursive(webuiSrc, resolve(outDir, 'webui'));
+        console.log(`[copy-mkbot-assets] webui/ → ${OUT_DIR}/webui`);
       }
 
       const dataSrc = resolve(__dirname, 'data');
       if (fs.existsSync(dataSrc)) {
-        copyDirRecursive(dataSrc, resolve(distDir, 'data'));
-        console.log('[copy-mkbot-assets] data/ → dist/data');
+        copyDirRecursive(dataSrc, resolve(outDir, 'data'));
+        console.log(`[copy-mkbot-assets] data/ → ${OUT_DIR}/data`);
+      }
+
+      const assetsSrc = resolve(__dirname, 'assets');
+      if (fs.existsSync(assetsSrc)) {
+        copyDirRecursive(assetsSrc, resolve(outDir, 'assets'));
+        console.log(`[copy-mkbot-assets] assets/ → ${OUT_DIR}/assets（插件头像等静态资源）`);
+      }
+
+      const iconPath = resolve(outDir, 'assets', 'chajian.jpg');
+      if (!fs.existsSync(iconPath)) {
+        console.warn(
+          `[copy-mkbot-assets] 未找到插件头像 assets/chajian.jpg，请在 MKbot13/assets/chajian.jpg 放置图片，并在 plugin.json 配置 "icon": "assets/chajian.jpg"`
+        );
+      } else {
+        console.log(`[copy-mkbot-assets] 插件头像: ${OUT_DIR}/assets/chajian.jpg（plugin.json icon 指向此文件）`);
       }
 
       const pluginJson = resolve(__dirname, 'plugin.json');
       if (fs.existsSync(pluginJson)) {
-        fs.copyFileSync(pluginJson, resolve(distDir, 'plugin.json'));
-        console.log('[copy-mkbot-assets] plugin.json → dist/plugin.json');
+        const manifest = JSON.parse(fs.readFileSync(pluginJson, 'utf-8')) as Record<string, unknown>;
+        manifest.name = KAKAKE_PLUGIN_NAME;
+        fs.writeFileSync(resolve(outDir, 'plugin.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        console.log(`[copy-mkbot-assets] plugin.json → ${OUT_DIR}/plugin.json (name=${KAKAKE_PLUGIN_NAME})`);
       }
 
       const pkgPath = resolve(__dirname, 'package.json');
@@ -74,8 +92,8 @@ function copyMkbotAssetsPlugin() {
         if (pkg.napcat) {
           distPkg.napcat = pkg.napcat;
         }
-        fs.writeFileSync(resolve(distDir, 'package.json'), JSON.stringify(distPkg, null, 2));
-        console.log('[copy-mkbot-assets] 已写入 dist/package.json');
+        fs.writeFileSync(resolve(outDir, 'package.json'), JSON.stringify(distPkg, null, 2));
+        console.log(`[copy-mkbot-assets] 已写入 ${OUT_DIR}/package.json`);
       }
     },
   };
@@ -100,7 +118,7 @@ export default defineConfig({
         inlineDynamicImports: true,
       },
     },
-    outDir: 'dist',
+    outDir: OUT_DIR,
   },
   plugins: [nodeResolve(), copyMkbotAssetsPlugin()],
 });
