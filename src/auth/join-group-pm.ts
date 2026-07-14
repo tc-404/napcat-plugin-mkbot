@@ -10,7 +10,8 @@ import type {
   MkMessageEvent,
   MkPluginContext,
 } from '../types';
-import { 发消息, 发合并消息, 段_文本, 段_图片, 段_视频 } from '../BOT';
+import { 发消息, 发合并消息, 段_文本, 段_图片, 段_视频, 构建合并转发预览, attachForwardPreviewToParams, 合并预览 } from '../BOT';
+import { mkAppendInlineForwardToContent, mkIsSnowLumaBackend } from '../lib/snowluma-compat';
 
 const JOIN_PM_STORAGE_REL = '筱筱吖/扩展功能/入群私聊/分群';
 export const JOIN_PM_PROBABILITY_FILE = '筱筱吖/扩展功能/入群私聊/概率.json';
@@ -602,9 +603,9 @@ function buildOb11ContentFromSegments(
         break;
       case 'forward': {
         if (depth >= MAX_FORWARD_DEPTH || !seg.节点?.length) break;
-        content.push({ type: 'forward', data: { id: '0' } });
+        const childNodes = [];
         for (const child of seg.节点) {
-          content.push({
+          childNodes.push({
             type: 'node',
             data: {
               name: child.name,
@@ -613,6 +614,19 @@ function buildOb11ContentFromSegments(
               content: buildOb11ContentFromSegments(child.segments, deps, depth + 1),
             },
           });
+        }
+        if (mkIsSnowLumaBackend()) {
+          const merged = mkAppendInlineForwardToContent(
+            [...content],
+            childNodes,
+            seg.节点[0]?.uin ?? '0',
+            seg.节点[0]?.name,
+          );
+          content.length = 0;
+          content.push(...merged);
+        } else {
+          content.push({ type: 'forward', data: { id: '0' } });
+          content.push(...childNodes);
         }
         break;
       }
@@ -687,11 +701,31 @@ async function replayJoinPmParsedForward(
     },
   }));
 
+  const logicalNodes = nodes.map((node) => ({
+    name: node.name,
+    qq: node.uin,
+    time: node.time,
+    content: buildOb11ContentFromSegments(node.segments, deps, 0),
+  }));
+
   const params = {
     ...joinPmPrivateSendBase(event, options),
     message: ob11Nodes,
     messages: ob11Nodes,
   };
+  attachForwardPreviewToParams(
+    params,
+    构建合并转发预览(
+      logicalNodes,
+      event,
+      合并预览(
+        '入群私聊收录',
+        `共 ${nodes.length} 条入群欢迎/私聊记录`,
+        '[聊天记录]',
+        [],
+      ),
+    ),
+  );
 
   try {
     await deps.botApi(ctx, 'send_private_forward_msg', params);
@@ -731,7 +765,11 @@ export async function replayJoinGroupPmEntry(
       if (Array.isArray(nodes) && nodes.length) {
         await replayJoinPmParsedForward(event, ctx, nodes, deps, options);
       } else if (内容) {
-        await 发合并消息(event, [{ id: String(内容), name: '入群记录' }]);
+        await 发合并消息(
+          event,
+          [{ id: String(内容), name: '入群记录' }],
+          合并预览('入群私聊历史', '查看已收录的合并转发记录', '[聊天记录]', ['入群记录: [聊天记录]']),
+        );
       }
       break;
     }

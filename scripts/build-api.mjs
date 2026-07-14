@@ -16,7 +16,7 @@ const nodeModules = [
   ...builtinModules.map((m) => `node:${m}`),
 ].flat();
 
-const apiEntries = ['blbl', 'dy', 'xhs', 'ks'];
+const apiEntries = ['blbl', 'dy', 'xhs', 'ks', 'imghost'];
 const OUT_DIR = 'napcat-plugin-mkbot';
 const outDir = resolve(root, OUT_DIR, 'lib/api');
 

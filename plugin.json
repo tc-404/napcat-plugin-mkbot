@@ -3,7 +3,7 @@
   "runtime": "mkbot",
   "displayName": "MKbot",
   "author": "三个句号",
-  "version": "2.3.5.alpha.3",
+  "version": "2.3.6.alpha.3",
   "loader": "MKcc",
   "entry": "index.mjs",
   "compat_layer": "MKcc",

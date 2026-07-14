@@ -21,6 +21,9 @@ export interface MkbotWebUiConfig {
   mkbot_render_api_base?: string;
   今日运势失败不发原图?: boolean;
   mkbot_bg_inline_max_kb?: number;
+  图片渲染?: boolean;
+  渲染开关?: boolean;
+  渲染模式?: 'html' | 'sharp' | string;
   cs_of?: boolean;
   [key: string]: unknown;
 }
@@ -224,6 +227,8 @@ export type ApiInterfaceHandleResult = MkCommandHandleResult;
 /** drift-bottle 模块 handleMessage 返回值 */
 export type DriftBottleHandleResult = MkCommandHandleResult;
 
+export type CardShopHandleResult = MkCommandHandleResult;
+
 /** 今日运势 HTML 渲染卡片数据 */
 export interface FortuneRenderCard {
   qq?: string;
@@ -275,6 +280,7 @@ export interface ApiInterfaceDeps {
     data?: MkHtmlRenderOptions | Record<string, unknown> | null
   ) => Promise<string | null | undefined>;
   buildSimpleFortuneHtml: (card?: FortuneRenderCard) => string;
+  getDataPath: () => string;
 }
 
 /** drift-bottle 模块注入依赖 */
@@ -290,6 +296,19 @@ export interface DriftBottleDeps {
   giveText: (message: unknown) => string;
   giveImages: (message: unknown) => string[];
   downloadFile: (url: string, savePath: string, isAbsolute?: boolean) => Promise<unknown>;
+}
+
+/** 发卡系统：商品维护、商店浏览、归笺兑换 */
+export interface CardShopDeps {
+  readB: MkReadB;
+  writeB: MkWriteB;
+  readA: MkReadA;
+  writeA: MkWriteA;
+  rand: MkRand;
+  checkOwner3: MkCheckOwner3;
+  getDataPath: () => string;
+  /** MK 内部 QQ 邮箱发信，可选注入 */
+  发邮箱?: (provider: string, ...args: unknown[]) => Promise<{ ok: boolean; message?: string }>;
 }
 
 /** 入群私聊：forward 解析收录 / 查看记录回放 */

@@ -1,7 +1,7 @@
 {
   "name": "napcat-plugin-mkbot",
   "plugin": "MKbot",
-  "version": "2.3.5.alpha.3",
+  "version": "2.3.6.alpha.3",
   "type": "module",
   "main": "index.mjs",
   "description": "MKbot - 综合娱乐和群管",
@@ -25,7 +25,8 @@
   "dependencies": {
     "extract-zip": "^2.0.1",
     "fflate": "^0.8.2",
-    "napcat-types": "0.0.16"
+    "napcat-types": "0.0.16",
+    "sharp": "^0.34.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

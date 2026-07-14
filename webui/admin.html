@@ -82,6 +82,18 @@
 
     *, *::before, *::after { box-sizing: border-box; }
 
+    /* 全局隐藏滚动条，保留滚动能力 */
+    html, body, * {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    *::-webkit-scrollbar {
+      display: none;
+      width: 0 !important;
+      height: 0 !important;
+      background: transparent;
+    }
+
     html {
       color-scheme: light dark;
       -webkit-text-size-adjust: 100%;
@@ -1541,15 +1553,6 @@
       padding: 14px 16px;
       background: var(--mk-surface-muted);
       -webkit-overflow-scrolling: touch;
-    }
-
-    .mk-panel-body::-webkit-scrollbar,
-    .sidebar::-webkit-scrollbar { width: 6px; height: 6px; }
-
-    .mk-panel-body::-webkit-scrollbar-thumb,
-    .sidebar::-webkit-scrollbar-thumb {
-      background: var(--mk-border-strong);
-      border-radius: 10px;
     }
 
     .mk-title-lg {
@@ -3138,25 +3141,259 @@
      * 目标列表只剩一条高度并在内部滚动。改为：本页整体纵向滚动，列表自然增高、不再单独滚动。
      */
     #page-broadcast.page-content,
-    #page-auto-like.page-content {
+    #page-auto-like.page-content,
+    #page-card-shop.page-content {
       overflow-x: hidden;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
     #page-broadcast .glass-card,
-    #page-auto-like .glass-card {
+    #page-auto-like .glass-card,
+    #page-card-shop .glass-card {
       flex: 0 0 auto;
       min-height: auto;
       max-height: none;
       overflow: visible;
     }
     #page-broadcast .mk-panel-body,
-    #page-auto-like .mk-panel-body {
+    #page-auto-like .mk-panel-body,
+    #page-card-shop .mk-panel-body {
       flex: none;
       min-height: auto;
       overflow: visible;
       padding-bottom: max(20px, var(--mk-safe-bottom));
     }
+
+    /* 发卡系统 */
+    #page-card-shop .mk-cs-tab-panel { display: none; }
+    #page-card-shop .mk-cs-tab-panel.is-active { display: block; }
+    #page-card-shop .mk-cs-hero {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin: 0 0 16px;
+      padding: 16px 18px;
+      border-radius: var(--mk-radius);
+      border: 1px solid var(--mk-border);
+      background: linear-gradient(135deg, var(--mk-primary-soft) 0%, var(--mk-surface) 55%);
+      box-shadow: var(--mk-shadow);
+    }
+    #page-card-shop .mk-cs-hero__icon {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: var(--mk-primary);
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--mk-primary) 35%, transparent);
+    }
+    #page-card-shop .mk-cs-hero__title {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--mk-text);
+    }
+    #page-card-shop .mk-cs-hero__desc {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--mk-text-muted);
+    }
+    #page-card-shop .mk-cs-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 720px) {
+      #page-card-shop .mk-cs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    #page-card-shop .mk-cs-stat {
+      padding: 12px 14px;
+      border-radius: var(--mk-radius-sm);
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface);
+      box-shadow: var(--mk-shadow);
+    }
+    #page-card-shop .mk-cs-stat__label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--mk-text-muted);
+      margin-bottom: 4px;
+    }
+    #page-card-shop .mk-cs-stat__value {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--mk-text);
+    }
+    #page-card-shop .mk-cs-stat--accent .mk-cs-stat__value { color: var(--mk-primary); }
+    #page-card-shop .mk-cs-stat--ok .mk-cs-stat__value { color: var(--mk-success); }
+    #page-card-shop .mk-cs-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    #page-card-shop .mk-cs-email-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface-muted);
+    }
+
+    #page-card-shop .mk-cs-email-row__main {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    #page-card-shop .mk-cs-email-row__title {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--mk-text);
+    }
+
+    #page-card-shop .mk-cs-email-row__desc {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--mk-text-muted);
+    }
+
+    #page-card-shop .mk-cs-email-row.is-warn {
+      border-color: rgba(245, 158, 11, 0.45);
+      background: rgba(245, 158, 11, 0.08);
+    }
+
+    #page-card-shop .mk-cs-toolbar .mk-input { flex: 1; min-width: 140px; }
+    #page-card-shop .mk-cs-toolbar .mk-search-field { flex: 1; min-width: 180px; margin: 0; }
+    #page-card-shop #cardShop-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    #page-card-shop .mk-entity-card--shop {
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    #page-card-shop .mk-entity-card--shop:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--mk-shadow-lg);
+    }
+    #page-card-shop .mk-entity-card--shop.is-active {
+      border-color: var(--mk-primary);
+      box-shadow: 0 0 0 2px var(--mk-primary-soft);
+    }
+    #page-card-shop .mk-entity-card--shop .mk-entity-card__status.is-on {
+      background: var(--mk-success-soft);
+      color: var(--mk-success);
+    }
+    #page-card-shop .mk-entity-card--shop .mk-entity-card__status.is-off {
+      background: var(--mk-danger-soft);
+      color: var(--mk-danger);
+    }
+    #page-card-shop .mk-cs-log-card {
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      border-radius: var(--mk-radius-sm);
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface);
+      box-shadow: var(--mk-shadow);
+    }
+    #page-card-shop .mk-cs-log-card__head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    #page-card-shop .mk-cs-log-card__time {
+      font-size: 12px;
+      color: var(--mk-text-muted);
+    }
+    #page-card-shop .mk-cs-log-card__qq {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--mk-text);
+    }
+    #page-card-shop .mk-cs-log-card__money {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--mk-primary-soft);
+      color: var(--mk-primary);
+    }
+    #page-card-shop .mk-cs-log-card__codes {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--mk-text-muted);
+      word-break: break-all;
+    }
+    .mk-card-shop-modal { max-width: min(560px, 96vw); }
+    .mk-card-shop-modal .mk-cs-info {
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--mk-border);
+      border-radius: 10px;
+      background: var(--mk-surface-muted);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--mk-text-muted);
+    }
+    .mk-card-shop-modal .mk-cs-stock-box {
+      max-height: 168px;
+      overflow: auto;
+      border: 1px solid var(--mk-border);
+      border-radius: var(--mk-radius-sm);
+      background: var(--mk-surface-muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .mk-card-shop-modal .mk-cs-stock-row {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--mk-border);
+      word-break: break-all;
+    }
+    .mk-card-shop-modal .mk-cs-stock-row--pickable {
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.12s ease, padding-left 0.12s ease;
+    }
+    .mk-card-shop-modal .mk-cs-stock-row--pickable:hover {
+      background: var(--mk-primary-soft);
+    }
+    .mk-card-shop-modal .mk-cs-stock-row.is-pick {
+      background: var(--mk-danger-soft);
+      box-shadow: inset 3px 0 0 var(--mk-danger);
+      padding-left: 7px;
+    }
+    .mk-card-shop-modal .mk-cs-remove-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .mk-card-shop-modal .mk-cs-remove-head .mk-label { margin: 0; }
+    .mk-card-shop-modal .mk-cs-stock-row:last-child { border-bottom: none; }
     .mk-setting-block {
       background: var(--mk-surface);
       border: 1px solid var(--mk-border);
@@ -3526,6 +3763,616 @@
     body.fun-bg #page-settings .mk-settings-section__icon {
       background: rgba(255, 255, 255, 0.22);
       border-color: rgba(255, 255, 255, 0.28);
+    }
+
+    /* 进阶设置 — 复用基础设置布局 + QQ 邮箱槽位 */
+    #page-settings-advanced .mk-settings-head {
+      text-align: center;
+      padding-bottom: 16px;
+    }
+
+    #page-settings-advanced .mk-settings-head__desc {
+      margin: 8px auto 0;
+      max-width: 28em;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-settings-head .mk-title-lg::after {
+      content: "";
+      display: block;
+      width: 48px;
+      height: 3px;
+      margin: 10px auto 0;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--mk-primary), color-mix(in srgb, var(--mk-primary) 35%, transparent));
+    }
+
+    #page-settings-advanced .mk-settings-body {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding-bottom: 18px;
+    }
+
+    #page-settings-advanced .mk-settings-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    #page-settings-advanced .mk-settings-section__head {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 0 2px;
+    }
+
+    #page-settings-advanced .mk-settings-section__head--split {
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    #page-settings-advanced .mk-settings-section__head-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    #page-settings-advanced .mk-settings-section__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      color: var(--mk-primary);
+      background: color-mix(in srgb, var(--mk-primary) 12%, var(--mk-surface-muted));
+      border: 1px solid color-mix(in srgb, var(--mk-primary) 18%, transparent);
+    }
+
+    #page-settings-advanced .mk-settings-section__icon svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    #page-settings-advanced .mk-settings-section__title {
+      margin: 0;
+      font-family: var(--mk-font-display);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--mk-ink, var(--mk-text));
+      line-height: 1.3;
+    }
+
+    #page-settings-advanced .mk-settings-section__desc {
+      margin: 3px 0 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-settings-panel {
+      border-radius: 14px;
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface);
+      box-shadow: var(--mk-shadow);
+      overflow: hidden;
+    }
+
+    #page-settings-advanced .mk-settings-panel__inner {
+      padding: 16px;
+    }
+
+    #page-settings-advanced .mk-qq-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--mk-border);
+    }
+
+    #page-settings-advanced .mk-qq-toolbar__path {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--mk-text-muted);
+      word-break: break-all;
+    }
+
+    #page-settings-advanced .mk-qq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 720px) {
+      #page-settings-advanced .mk-qq-grid { grid-template-columns: 1fr; }
+    }
+
+    #page-settings-advanced .mk-qq-slot {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      min-height: 228px;
+      height: 100%;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1.5px dashed color-mix(in srgb, var(--mk-primary) 35%, transparent);
+      background: color-mix(in srgb, var(--mk-primary) 4%, var(--mk-surface));
+      cursor: pointer;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    }
+
+    #page-settings-advanced .mk-qq-slot:hover {
+      transform: translateY(-1px);
+      border-color: color-mix(in srgb, var(--mk-primary) 55%, transparent);
+      box-shadow: 0 8px 24px color-mix(in srgb, var(--mk-primary) 12%, transparent);
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-ok {
+      border-style: solid;
+      border-color: rgba(34, 197, 94, 0.65);
+      background: rgba(34, 197, 94, 0.08);
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-fail,
+    #page-settings-advanced .mk-qq-slot.is-incomplete {
+      border-style: solid;
+      border-color: rgba(239, 68, 68, 0.72);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-unknown {
+      border-style: solid;
+      border-color: rgba(245, 158, 11, 0.65);
+      background: rgba(245, 158, 11, 0.08);
+    }
+
+    #page-settings-advanced .mk-qq-slot__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 28px;
+      margin-bottom: 12px;
+    }
+
+    #page-settings-advanced .mk-qq-slot__index {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--mk-text);
+      line-height: 1.2;
+    }
+
+    #page-settings-advanced .mk-qq-slot__badge {
+      flex-shrink: 0;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--mk-surface-muted);
+      color: var(--mk-text-muted);
+      border: 1px solid var(--mk-border);
+      line-height: 1.3;
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-ok .mk-qq-slot__badge {
+      color: #15803d;
+      border-color: rgba(34, 197, 94, 0.35);
+      background: rgba(34, 197, 94, 0.14);
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-fail .mk-qq-slot__badge,
+    #page-settings-advanced .mk-qq-slot.is-incomplete .mk-qq-slot__badge {
+      color: #b91c1c;
+      border-color: rgba(239, 68, 68, 0.35);
+      background: rgba(239, 68, 68, 0.14);
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-unknown .mk-qq-slot__badge {
+      color: #b45309;
+      border-color: rgba(245, 158, 11, 0.35);
+      background: rgba(245, 158, 11, 0.14);
+    }
+
+    #page-settings-advanced .mk-qq-slot__email {
+      min-height: 42px;
+      margin: 0 0 12px;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.35;
+      color: var(--mk-text);
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    #page-settings-advanced .mk-qq-slot.is-empty .mk-qq-slot__email {
+      color: var(--mk-text-muted);
+      font-weight: 500;
+      font-style: italic;
+    }
+
+    #page-settings-advanced .mk-qq-slot__meta {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px dashed var(--mk-border);
+    }
+
+    #page-settings-advanced .mk-qq-slot__row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 20px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    #page-settings-advanced .mk-qq-slot__row-label {
+      flex-shrink: 0;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-qq-slot__row-value {
+      text-align: right;
+      color: var(--mk-text);
+      word-break: break-all;
+    }
+
+    #page-settings-advanced .mk-qq-slot__foot {
+      margin-top: 10px;
+      font-size: 11px;
+      line-height: 1.35;
+      text-align: center;
+      color: var(--mk-text-muted);
+    }
+
+    #qqMailConfigModal .mk-qq-once-banner {
+      display: none;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: var(--mk-radius-sm);
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      background: rgba(245, 158, 11, 0.12);
+      color: #92400e;
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    html.dark #qqMailConfigModal .mk-qq-once-banner { color: #fbbf24; }
+
+    #qqMailConfigModal .mk-qq-once-banner.is-visible { display: block; }
+
+    /* 离线通知配置 */
+    #page-settings-advanced .mk-offline-brief {
+      margin: 12px 0 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-offline-brief.is-warn {
+      color: #b45309;
+    }
+
+    #page-settings-advanced .mk-offline-brief.is-ok {
+      color: #15803d;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card {
+      border-radius: 12px;
+      border: 1px solid var(--mk-border);
+      background: color-mix(in srgb, var(--mk-surface-muted) 65%, transparent);
+      padding: 14px 16px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card.is-ok {
+      border-color: color-mix(in srgb, #15803d 35%, var(--mk-border));
+      background: color-mix(in srgb, #15803d 6%, var(--mk-surface-muted));
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card.is-warn,
+    #page-settings-advanced .mk-sharp-deps-card.is-fail {
+      border-color: color-mix(in srgb, #b45309 35%, var(--mk-border));
+      background: color-mix(in srgb, #b45309 6%, var(--mk-surface-muted));
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card.is-running {
+      border-color: color-mix(in srgb, var(--mk-primary) 40%, var(--mk-border));
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--mk-primary) 12%, transparent);
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--mk-ink, var(--mk-text));
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--mk-border);
+      color: var(--mk-text-muted);
+      background: var(--mk-surface);
+      white-space: nowrap;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card.is-ok .mk-sharp-deps-card__badge {
+      color: #15803d;
+      border-color: color-mix(in srgb, #15803d 30%, transparent);
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card.is-running .mk-sharp-deps-card__badge {
+      color: var(--mk-primary);
+      border-color: color-mix(in srgb, var(--mk-primary) 30%, transparent);
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__desc,
+    #page-settings-advanced .mk-sharp-deps-card__status {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__status {
+      margin-top: 8px;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-card__actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    #page-settings-advanced .mk-sharp-deps-progress {
+      margin-top: 10px;
+    }
+
+    #page-settings-advanced .mk-render-config-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px 14px;
+    }
+
+    #page-settings-advanced .mk-render-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--mk-border);
+      background: color-mix(in srgb, var(--mk-surface-muted) 55%, transparent);
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+
+    #page-settings-advanced .mk-render-row.is-on {
+      border-color: color-mix(in srgb, var(--mk-primary) 30%, var(--mk-border));
+      background: linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--mk-primary-soft) 65%, var(--mk-surface)) 0%,
+        color-mix(in srgb, var(--mk-surface-muted) 40%, var(--mk-surface)) 100%
+      );
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--mk-primary) 10%, transparent);
+    }
+
+    #page-settings-advanced .mk-render-row__main {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #page-settings-advanced .mk-render-row__title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.35;
+      color: var(--mk-text);
+    }
+
+    #page-settings-advanced .mk-render-row.is-on .mk-render-row__title {
+      color: color-mix(in srgb, var(--mk-primary) 78%, var(--mk-text));
+    }
+
+    #page-settings-advanced .mk-render-row__desc {
+      margin: 4px 0 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--mk-text-muted);
+    }
+
+    #page-settings-advanced .mk-render-action-btn {
+      flex-shrink: 0;
+      min-width: 76px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--mk-border-strong);
+      background: var(--mk-surface);
+      color: var(--mk-text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+
+    #page-settings-advanced .mk-render-action-btn.is-on {
+      border-color: color-mix(in srgb, var(--mk-primary) 45%, var(--mk-border));
+      background: color-mix(in srgb, var(--mk-primary-soft) 75%, var(--mk-surface));
+      color: var(--mk-primary);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--mk-primary) 12%, transparent);
+    }
+
+    #page-settings-advanced .mk-pill-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px;
+      border-radius: 999px;
+      border: 1px solid var(--mk-border);
+      background: color-mix(in srgb, var(--mk-surface-muted) 70%, transparent);
+      flex-shrink: 0;
+    }
+
+    #page-settings-advanced .mk-pill-switch__btn {
+      border: none;
+      background: transparent;
+      color: var(--mk-text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: color 0.2s, background 0.2s, box-shadow 0.2s;
+      white-space: nowrap;
+    }
+
+    #page-settings-advanced .mk-pill-switch__btn:hover {
+      color: var(--mk-text);
+    }
+
+    #page-settings-advanced .mk-pill-switch__btn--active {
+      color: var(--mk-primary);
+      background: var(--mk-surface);
+      box-shadow: 0 1px 4px color-mix(in srgb, var(--mk-primary) 12%, transparent);
+    }
+
+    #page-settings-advanced .mk-render-mode-field {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+
+    html.dark #page-settings-advanced .mk-offline-brief.is-warn {
+      color: #fbbf24;
+    }
+
+    #offlineNotifyModal .mk-offline-toggle-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      border-radius: var(--mk-radius-sm);
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface-muted);
+    }
+
+    #offlineNotifyModal .mk-offline-toggle-row__title {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--mk-ink, var(--mk-text));
+    }
+
+    #offlineNotifyModal .mk-offline-toggle-row__desc {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--mk-text-muted);
+    }
+
+    #offlineNotifyModal .mk-offline-toggle-row.is-warn .mk-offline-toggle-row__desc {
+      color: #b45309;
+    }
+
+    html.dark #offlineNotifyModal .mk-offline-toggle-row.is-warn .mk-offline-toggle-row__desc {
+      color: #fbbf24;
+    }
+
+    #offlineNotifyModal .mk-offline-body {
+      position: relative;
+      padding: 14px;
+      border-radius: var(--mk-radius-sm);
+      border: 1px solid var(--mk-border);
+      background: var(--mk-surface);
+    }
+
+    #offlineNotifyModal .mk-offline-body.is-disabled {
+      opacity: 0.55;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    #offlineNotifyModal .mk-offline-owner-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    #offlineNotifyModal .mk-offline-owner-head__title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--mk-ink, var(--mk-text));
+    }
+
+    #offlineNotifyModal .mk-offline-owner-add {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 32px;
+      padding: 0 12px;
+      border: none;
+      border-radius: 999px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--mk-primary-hover), var(--mk-primary));
+    }
+
+    #offlineNotifyModal .mk-offline-qq-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 40px;
+    }
+
+    #offlineNotifyModal .mk-offline-qq-card {
+      padding: 7px 13px;
+      border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+      border: 1px solid color-mix(in srgb, var(--mk-primary) 22%, var(--mk-border));
+      background: color-mix(in srgb, var(--mk-primary-soft) 55%, var(--mk-surface-muted));
+      cursor: pointer;
+    }
+
+    #offlineNotifyModal .mk-offline-qq-card:hover {
+      border-color: color-mix(in srgb, var(--mk-primary) 45%, var(--mk-border));
+      background: color-mix(in srgb, var(--mk-primary-soft) 75%, var(--mk-surface-muted));
     }
 
     .mk-hint {
@@ -5177,6 +6024,36 @@
       }
     }
 
+    #secretNumberPanel .mk-secret-dev-pill {
+      display: flex;
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--mk-border-strong);
+      background: var(--mk-surface);
+      color: var(--mk-text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.2;
+      cursor: pointer;
+      justify-content: center;
+      align-items: center;
+      transition: color 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+
+    #secretNumberPanel .mk-secret-dev-pill:hover {
+      color: var(--mk-text);
+      border-color: color-mix(in srgb, var(--mk-primary) 28%, var(--mk-border-strong));
+    }
+
+    #secretNumberPanel .mk-secret-dev-pill.is-on {
+      border-color: color-mix(in srgb, var(--mk-primary) 45%, var(--mk-border));
+      background: color-mix(in srgb, var(--mk-primary-soft) 75%, var(--mk-surface));
+      color: var(--mk-primary);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--mk-primary) 12%, transparent);
+    }
+
     /* ========== 调试控制台 ========== */
     .mk-debug-panel {
       position: fixed;
@@ -6720,7 +7597,7 @@
       }
     }
 
-    /* 发现新版本弹窗（公告页） */
+    /* 发现新版本弹窗（公告页） - GitHub 风格 */
     .mk-update-modal-overlay {
       position: fixed;
       inset: 0;
@@ -6730,152 +7607,243 @@
       justify-content: center;
       padding: 20px;
       padding-bottom: max(20px, var(--mk-safe-bottom));
-      background: color-mix(in srgb, var(--mk-bg) 55%, rgba(9, 9, 11, 0.55));
-      backdrop-filter: blur(8px);
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
     }
     .mk-update-modal-overlay.is-open { display: flex; }
 
     .mk-update-modal {
       position: relative;
       width: 100%;
-      max-width: 400px;
-      padding: 22px 22px 20px;
-      border-radius: 14px;
+      max-width: 440px;
+      border-radius: var(--mk-radius-lg);
       background: var(--mk-surface);
       border: 1px solid var(--mk-border);
       box-shadow: var(--mk-shadow-lg);
-      animation: mk-update-modal-in 0.28s ease-out;
+      animation: mk-update-modal-in 0.2s cubic-bezier(0.2, 0, 0, 1);
+      overflow: hidden;
     }
     @keyframes mk-update-modal-in {
-      from { opacity: 0; transform: translateY(10px) scale(0.98); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
     }
 
-    .mk-update-modal__close {
-      position: absolute;
-      top: 14px;
-      right: 14px;
-      width: 32px;
-      height: 32px;
-      padding: 0;
-      border: none;
-      border-radius: 8px;
-      background: transparent;
-      color: var(--mk-text-muted);
-      font-size: 20px;
-      line-height: 1;
-      cursor: pointer;
+    /* 弹窗头部 - GitHub 风格简洁头部 */
+    .mk-update-modal__header {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--mk-border);
     }
-    .mk-update-modal__close:hover {
+
+    .mk-update-modal__icon {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
       background: var(--mk-primary-soft);
       color: var(--mk-primary);
     }
 
-    .mk-update-modal__title {
-      margin: 0 36px 18px 0;
-      font-family: var(--mk-font-display);
-      font-size: 1.2rem;
-      font-weight: 700;
-      color: var(--mk-ink);
-      letter-spacing: 0.02em;
+    .mk-update-modal__header-text {
+      flex: 1;
+      min-width: 0;
     }
-    html.dark .mk-update-modal__title { color: var(--mk-text); }
 
-    .mk-update-modal__compare {
+    .mk-update-modal__title {
+      margin: 0 0 4px 0;
+      font-family: var(--mk-font-display);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--mk-text);
+      line-height: 1.4;
+    }
+
+    .mk-update-modal__subtitle {
+      margin: 0;
+      font-size: 13px;
+      color: var(--mk-text-muted);
+      line-height: 1.5;
+    }
+
+    .mk-update-modal__close {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--mk-text-muted);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 16px 14px;
-      margin-bottom: 22px;
-      border-radius: var(--mk-radius);
+      justify-content: center;
+      transition: all 0.15s ease;
+    }
+    .mk-update-modal__close:hover {
       background: var(--mk-surface-muted);
+      color: var(--mk-text);
+    }
+
+    /* 弹窗内容区 */
+    .mk-update-modal__body {
+      padding: 20px;
+    }
+
+    /* 版本对比 - GitHub Release 风格 */
+    .mk-update-modal__compare {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      border-radius: var(--mk-radius);
       border: 1px solid var(--mk-border);
+      overflow: hidden;
     }
 
     .mk-update-modal__col {
       flex: 1;
       min-width: 0;
+      padding: 16px 12px;
       text-align: center;
+      background: var(--mk-surface-muted);
     }
+    .mk-update-modal__col--latest {
+      background: color-mix(in srgb, var(--mk-primary) 8%, var(--mk-surface-muted));
+    }
+
     .mk-update-modal__label {
       display: block;
       margin-bottom: 8px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--mk-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
-    .mk-update-modal__label--latest { color: var(--mk-primary); }
+    .mk-update-modal__label--latest { 
+      color: var(--mk-primary); 
+    }
 
     .mk-update-modal__ver {
       display: inline-block;
       max-width: 100%;
-      padding: 6px 12px;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .mk-update-modal__ver--current {
-      background: color-mix(in srgb, var(--mk-border) 65%, var(--mk-surface));
+      background: var(--mk-surface);
       color: var(--mk-text-muted);
+      border: 1px solid var(--mk-border);
     }
     .mk-update-modal__ver--latest {
       background: var(--mk-primary);
       color: #fff;
-      box-shadow: 0 4px 14px var(--mk-primary-soft);
     }
 
     .mk-update-modal__arrow {
       flex-shrink: 0;
       width: 36px;
-      height: 36px;
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 50%;
-      background: var(--mk-primary-soft);
-      color: var(--mk-primary);
-      font-size: 18px;
-      font-weight: 700;
+      color: var(--mk-text-muted);
+      background: var(--mk-surface-muted);
+      border-left: 1px solid var(--mk-border);
+      border-right: 1px solid var(--mk-border);
     }
 
+    /* 更新内容预览 */
+    .mk-update-modal__changelog {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: var(--mk-radius);
+      background: var(--mk-surface-muted);
+      border: 1px solid var(--mk-border);
+    }
+    .mk-update-modal__changelog-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--mk-text);
+      margin-bottom: 8px;
+    }
+    .mk-update-modal__changelog-item {
+      font-size: 12px;
+      color: var(--mk-text-muted);
+      line-height: 1.6;
+      padding-left: 14px;
+      position: relative;
+    }
+    .mk-update-modal__changelog-item::before {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 8px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--mk-text-muted);
+    }
+
+    /* 操作按钮区域 - GitHub 风格按钮对齐 */
     .mk-update-modal__actions {
       display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 12px;
-      flex-wrap: wrap;
+      gap: 10px;
+      padding: 16px 20px 20px;
+      border-top: 1px solid var(--mk-border);
+      background: var(--mk-surface-muted);
     }
     .mk-update-modal__btn-later {
-      padding: 10px 14px;
-      border: none;
+      flex: 1;
+      min-height: 32px;
+      padding: 5px 16px;
+      border: 1px solid var(--mk-border);
       border-radius: var(--mk-btn-radius);
-      background: transparent;
-      color: var(--mk-primary);
-      font-size: 14px;
-      font-weight: 600;
+      background: var(--mk-surface);
+      color: var(--mk-text);
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
+      transition: all 0.15s ease;
     }
     .mk-update-modal__btn-later:hover {
-      background: var(--mk-primary-soft);
+      background: var(--mk-surface-muted);
+      border-color: var(--mk-border-strong);
     }
     .mk-update-modal__btn-now {
-      min-height: var(--mk-btn-h-sm);
-      padding: 0 22px;
-      border: none;
+      flex: 1;
+      min-height: 32px;
+      padding: 5px 16px;
+      border: 1px solid var(--mk-primary);
       border-radius: var(--mk-btn-radius);
       background: var(--mk-primary);
       color: #fff;
-      font-size: 14px;
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
-      box-shadow: 0 4px 16px var(--mk-primary-soft);
+      transition: all 0.15s ease;
     }
-    .mk-update-modal__btn-now:hover { background: var(--mk-primary-hover); }
-    .mk-update-modal__btn-now:active { background: var(--mk-primary-active); }
+    .mk-update-modal__btn-now:hover { 
+      background: var(--mk-primary-hover);
+      border-color: var(--mk-primary-hover);
+    }
+    .mk-update-modal__btn-now:active { 
+      background: var(--mk-primary-active);
+      border-color: var(--mk-primary-active);
+    }
 
     /* NapCat WebUI 未登录时阻断整页操作 */
     .mkbot-auth-gate {
@@ -6954,8 +7922,400 @@
       font-family: inherit;
     }
   </style>
-</head>
+
+  <style>
+    /* ========== 开屏动画 ========== */
+    .splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      overflow: hidden;
+      background: #08061a;
+      transition: opacity 1s ease, visibility 1s ease;
+    }
+    .splash-screen.splash-hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+    .splash-bg {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .splash-bg-aurora {
+      position: absolute;
+      width: 150%;
+      height: 150%;
+      top: -25%;
+      left: -25%;
+      background:
+        radial-gradient(ellipse 42% 34% at 12% 22%, rgba(255, 107, 157, 0.42) 0%, transparent 58%),
+        radial-gradient(ellipse 38% 32% at 88% 72%, rgba(107, 157, 255, 0.38) 0%, transparent 58%),
+        radial-gradient(ellipse 36% 38% at 52% 48%, rgba(196, 77, 255, 0.32) 0%, transparent 52%),
+        radial-gradient(ellipse 28% 24% at 78% 18%, rgba(107, 255, 181, 0.22) 0%, transparent 48%),
+        radial-gradient(ellipse 30% 28% at 22% 78%, rgba(255, 200, 120, 0.18) 0%, transparent 50%);
+      animation: splashAuroraDrift 16s ease-in-out infinite;
+    }
+    .splash-bg-aurora--2 {
+      opacity: 0.75;
+      mix-blend-mode: screen;
+      animation: splashAuroraDrift2 21s ease-in-out infinite reverse;
+      background:
+        radial-gradient(ellipse 35% 30% at 70% 30%, rgba(255, 150, 220, 0.3) 0%, transparent 55%),
+        radial-gradient(ellipse 40% 35% at 25% 65%, rgba(120, 180, 255, 0.28) 0%, transparent 55%),
+        radial-gradient(ellipse 32% 28% at 50% 80%, rgba(180, 120, 255, 0.25) 0%, transparent 50%);
+    }
+    @keyframes splashAuroraDrift {
+      0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+      33% { transform: translate(4%, -3%) rotate(3deg) scale(1.04); }
+      66% { transform: translate(-3%, 4%) rotate(-2deg) scale(0.97); }
+    }
+    @keyframes splashAuroraDrift2 {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      50% { transform: translate(-5%, 2%) rotate(-4deg); }
+    }
+    .splash-bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(circle, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+      background-size: 26px 26px;
+      mask-image: radial-gradient(ellipse 85% 75% at 50% 45%, black 15%, transparent 78%);
+      animation: splashGridPulse 7s ease-in-out infinite;
+    }
+    @keyframes splashGridPulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 0.9; }
+    }
+    .splash-bg-stars .splash-star {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 5px rgba(255, 255, 255, 0.55);
+      animation: splashStarTwinkle var(--d, 3s) ease-in-out infinite;
+      animation-delay: var(--delay, 0s);
+    }
+    .splash-bg-stars .splash-star.is-bright {
+      width: 3px;
+      height: 3px;
+      box-shadow: 0 0 8px rgba(255, 182, 213, 0.75);
+    }
+    @keyframes splashStarTwinkle {
+      0%, 100% { opacity: 0.25; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+    .splash-bubble {
+      position: absolute;
+      border-radius: 50%;
+      border: none;
+      background:
+        radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.9) 0%, var(--tint, rgba(255, 107, 157, 0.55)) 38%, transparent 72%);
+      animation: splashBubbleRise var(--dur, 12s) linear infinite;
+      animation-delay: var(--delay, 0s);
+      bottom: -40px;
+      opacity: 0;
+      box-shadow: var(--glow, none);
+    }
+    @keyframes splashBubbleRise {
+      0% { transform: translateY(0) translateX(0) scale(0.55); opacity: 0; }
+      8% { opacity: var(--peak, 0.45); }
+      92% { opacity: calc(var(--peak, 0.45) * 0.7); }
+      100% { transform: translateY(calc(-100vh - 140px)) translateX(var(--drift, 24px)) scale(1.08); opacity: 0; }
+    }
+    .splash-deco-icon {
+      position: absolute;
+      z-index: 0;
+      font-size: 18px;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      text-shadow: 0 0 12px currentColor;
+      animation: splashDecoIconFloat var(--dur, 9s) ease-in-out infinite;
+      animation-delay: var(--delay, 0s);
+    }
+    .splash-deco-icon:nth-child(2) {
+      top: 18%;
+      left: 12%;
+      color: rgba(255, 182, 213, 0.55);
+      --dur: 8s;
+      --delay: 0.2s;
+    }
+    .splash-deco-icon:nth-child(3) {
+      top: 72%;
+      left: 8%;
+      color: rgba(168, 212, 255, 0.5);
+      font-size: 14px;
+      --dur: 11s;
+      --delay: 1.4s;
+    }
+    .splash-deco-icon:nth-child(4) {
+      top: 22%;
+      right: 14%;
+      color: rgba(196, 181, 255, 0.55);
+      font-size: 22px;
+      --dur: 10s;
+      --delay: 0.8s;
+    }
+    .splash-deco-icon:nth-child(5) {
+      bottom: 20%;
+      right: 10%;
+      color: rgba(255, 200, 150, 0.45);
+      font-size: 16px;
+      --dur: 12s;
+      --delay: 2s;
+    }
+    .splash-deco-icon:nth-child(6) {
+      top: 48%;
+      left: 6%;
+      color: rgba(107, 255, 181, 0.4);
+      font-size: 12px;
+      --dur: 13s;
+      --delay: 3s;
+    }
+    @keyframes splashDecoIconFloat {
+      0%, 100% { opacity: 0; transform: translateY(0) rotate(0deg) scale(0.8); }
+      15%, 85% { opacity: 0.7; }
+      50% { transform: translateY(-18px) rotate(12deg) scale(1.1); }
+    }
+    .splash-particle-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    .splash-content {
+      position: relative;
+      z-index: 2;
+      text-align: center;
+    }
+    .splash-logo-wrapper {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      margin: 0 auto 48px;
+      opacity: 0;
+      animation: 
+        splashFadeInScale 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards 0.2s,
+        splashLogoFloat 3.5s ease-in-out infinite 0.2s;
+    }
+    @keyframes splashFadeInScale {
+      from { opacity: 0; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .splash-logo-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+    }
+    .splash-logo-ring:nth-child(1) {
+      width: 100%; height: 100%;
+      border: 1px solid rgba(255, 150, 200, 0.2);
+      animation: splashRingPulse 2.5s ease-in-out infinite;
+    }
+    .splash-logo-ring:nth-child(2) {
+      width: 75%; height: 75%;
+      border: 1px solid rgba(150, 200, 255, 0.25);
+      animation: splashRingPulse 2.5s ease-in-out infinite 0.4s;
+    }
+    .splash-logo-ring:nth-child(3) {
+      width: 50%; height: 50%;
+      border: 1px solid rgba(255, 200, 150, 0.3);
+      animation: splashRingPulse 2.5s ease-in-out infinite 0.8s;
+    }
+    @keyframes splashRingPulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
+      50% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.9; }
+    }
+    .splash-logo-core {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 84px;
+      height: 84px;
+      border-radius: 50%;
+      object-fit: cover;
+      box-shadow:
+        0 0 0 3px rgba(255, 255, 255, 0.12),
+        0 0 24px rgba(255, 107, 157, 0.45),
+        0 0 48px rgba(196, 77, 255, 0.28);
+      border: 2px solid rgba(255, 255, 255, 0.28);
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.86);
+      transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.45s ease;
+      animation: splashAvatarGlow 3s ease-in-out infinite;
+      z-index: 2;
+    }
+    .splash-logo-core.is-loaded {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    .splash-logo-core.is-bot {
+      box-shadow:
+        0 0 0 3px rgba(255, 182, 213, 0.35),
+        0 0 28px rgba(255, 107, 157, 0.7),
+        0 0 56px rgba(196, 77, 255, 0.45),
+        0 0 80px rgba(107, 157, 255, 0.25);
+    }
+    @keyframes splashAvatarGlow {
+      0%, 100% { filter: brightness(1) saturate(1); }
+      50% { filter: brightness(1.06) saturate(1.08); }
+    }
+    @keyframes splashLogoFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    .splash-title {
+      font-size: 48px;
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: 8px;
+      padding-left: 8px;
+    }
+    .splash-title-char {
+      display: inline-block;
+      background: linear-gradient(135deg, #fff 0%, #ffb6d5 30%, #c4b5ff 60%, #a8d4ff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      background-size: 200% 200%;
+      opacity: 0;
+      transform: translateY(20px);
+      animation: 
+        splashCharFadeInUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+        splashGradientShift 4s ease infinite;
+    }
+    @keyframes splashCharFadeInUp {
+      from { opacity: 0; transform: translateY(20px) scale(0.8); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes splashGradientShift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+    .splash-subtitle {
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.5);
+      letter-spacing: 4px;
+      font-weight: 300;
+      padding-left: 4px;
+    }
+    .splash-subtitle-char {
+      display: inline-block;
+      opacity: 0;
+      transform: translateY(10px);
+      animation: splashSubtitleFadeIn 0.5s ease forwards;
+    }
+    @keyframes splashSubtitleFadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .splash-loading-bar-container {
+      width: 280px;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      margin-top: 56px;
+      overflow: hidden;
+      opacity: 0;
+      animation: splashFadeIn 0.6s ease forwards 1.8s;
+    }
+    @keyframes splashFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .splash-loading-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #ff6b9d, #c44dff, #6b9dff, #6bffb5, #ff6b9d);
+      background-size: 300% 100%;
+      border-radius: 2px;
+      animation: 
+        splashLoadingProgress 2s cubic-bezier(0.4, 0, 0.2, 1) forwards 1.8s,
+        splashBarShimmer 2s linear infinite;
+      box-shadow: 0 0 10px rgba(255, 107, 157, 0.5);
+    }
+    @keyframes splashLoadingProgress {
+      0% { width: 0%; }
+      100% { width: 100%; }
+    }
+    @keyframes splashBarShimmer {
+      0% { background-position: 300% 0; }
+      100% { background-position: -300% 0; }
+    }
+    .splash-loading-text {
+      margin-top: 18px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+      letter-spacing: 2px;
+      font-weight: 300;
+      opacity: 0;
+      animation: splashFadeIn 0.6s ease forwards 2s;
+    }
+    .splash-loading-text::after {
+      content: '';
+      animation: splashDots 1.8s steps(4, end) infinite;
+    }
+    @keyframes splashDots {
+      0%, 20% { content: ''; }
+      40% { content: '·'; }
+      60% { content: '··'; }
+      80%, 100% { content: '···'; }
+    }
+    @keyframes splashPulseGlow {
+      0%, 100% { opacity: 0.6; text-shadow: 0 0 5px rgba(255, 107, 157, 0.3); }
+      50% { opacity: 1; text-shadow: 0 0 15px rgba(255, 107, 157, 0.6); }
+    }
+  </style>
+
+  </head>
 <body>
+  <!-- 开屏加载动画 -->
+  <div class="splash-screen" id="splashScreen">
+    <div class="splash-bg" aria-hidden="true">
+      <div class="splash-bg-aurora"></div>
+      <div class="splash-bg-aurora splash-bg-aurora--2"></div>
+      <div class="splash-bg-grid"></div>
+      <div class="splash-bg-stars" id="splashBgStars"></div>
+      <div class="splash-bubbles" id="splashBubbles"></div>
+    </div>
+    <span class="splash-deco-icon" aria-hidden="true">✦</span>
+    <span class="splash-deco-icon" aria-hidden="true">♡</span>
+    <span class="splash-deco-icon" aria-hidden="true">★</span>
+    <span class="splash-deco-icon" aria-hidden="true">✧</span>
+    <span class="splash-deco-icon" aria-hidden="true">◇</span>
+    <canvas class="splash-particle-canvas" id="splashParticleCanvas"></canvas>
+    <div class="splash-content">
+      <div class="splash-logo-wrapper">
+        <div class="splash-logo-ring"></div>
+        <div class="splash-logo-ring"></div>
+        <div class="splash-logo-ring"></div>
+        <img class="splash-logo-core" id="splashLogoImg" src="https://q4.qlogo.cn/g?b=qq&nk=864264375&s=640" alt="MKBOT" decoding="async">
+      </div>
+      <h1 class="splash-title" id="splashTitle"></h1>
+      <p class="splash-subtitle" id="splashSubtitle"></p>
+      <div class="splash-loading-bar-container">
+        <div class="splash-loading-bar"></div>
+      </div>
+      <p class="splash-loading-text" id="splashLoadingText">正在加载</p>
+    </div>
+  </div>
+
   <div id="mkbotAuthGate" class="mkbot-auth-gate" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mkbotAuthGateTitle">
     <div class="mkbot-auth-gate__card">
       <h2 id="mkbotAuthGateTitle" class="mkbot-auth-gate__title">需要 NapCat WebUI 登录</h2>
@@ -7034,6 +8394,9 @@
         <div class="nav-item" role="button" tabindex="0" onclick="switchPage('settings'); closeSidebar();" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('settings');closeSidebar();}">
           <span>基础设置</span>
         </div>
+        <div class="nav-item" role="button" tabindex="0" onclick="switchPage('settings-advanced'); closeSidebar();" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('settings-advanced');closeSidebar();}">
+          <span>进阶设置</span>
+        </div>
         <div class="nav-item" role="button" tabindex="0" onclick="switchPage('group-switch'); closeSidebar();" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('group-switch');closeSidebar();}">
           <span>开关管理</span>
         </div>
@@ -7060,6 +8423,11 @@
               onclick="switchPage('broadcast'); closeSidebar();"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('broadcast');closeSidebar();}">
               <span>群发管理</span>
+            </div>
+            <div class="nav-item nav-item--child" role="button" tabindex="0"
+              onclick="switchPage('card-shop'); closeSidebar();"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('card-shop');closeSidebar();}">
+              <span>发卡系统</span>
             </div>
             <div class="nav-item nav-item--child" role="button" tabindex="0"
               onclick="switchPage('data-edit'); closeSidebar();"
@@ -7249,7 +8617,7 @@
                       <span class="mk-settings-toggle__dot" aria-hidden="true"></span>
                       <div class="mk-settings-toggle__text">
                         <p class="mk-settings-toggle__title">测试功能</p>
-                        <p class="mk-settings-toggle__desc">需配搭 puppeteer 插件使用，可在插件商店下载</p>
+                        <p class="mk-settings-toggle__desc">实验性指令与能力（取数据、群文件、AI 对话等），与图片渲染无关</p>
                       </div>
                     </div>
                     <label class="toggle-switch">
@@ -7310,6 +8678,131 @@
               <button type="button" class="mk-btn mk-btn--primary" id="saveSettingsBtn" onclick="saveSettings()">保存设置</button>
               <button type="button" class="mk-btn mk-btn--ghost" id="resetSettingsBtn" onclick="loadSettings()">重置</button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-settings-advanced" class="page-content">
+        <div class="glass-card">
+          <div class="mk-panel-head mk-settings-head">
+            <h2 class="mk-title-lg mk-title-center">进阶设置</h2>
+            <p class="mk-settings-head__desc">敏感参数与扩展能力，仅后台可配置</p>
+          </div>
+          <div class="mk-panel-body mk-settings-body">
+            <section class="mk-settings-section">
+              <div class="mk-settings-section__head">
+                <span class="mk-settings-section__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                </span>
+                <div>
+                  <h3 class="mk-settings-section__title">渲染开关</h3>
+                  <p class="mk-settings-section__desc">全局图片渲染能力（与「测试功能」无关）；菜单、签到、运行状态等；可选 HTML（Puppeteer）或 Sharp（Node 原生）</p>
+                </div>
+              </div>
+              <div class="mk-settings-panel">
+                <div class="mk-render-config-list">
+                  <div class="mk-render-row" id="imageRenderRow">
+                    <div class="mk-render-row__main">
+                      <p class="mk-render-row__title">渲染开关</p>
+                      <p class="mk-render-row__desc">开启后支持图片版菜单等；关闭则仅文字版（全局生效）</p>
+                    </div>
+                    <button type="button" class="mk-render-action-btn" id="imageRenderBtn" onclick="toggleImageRender()">已关闭</button>
+                  </div>
+                  <div class="mk-render-row" id="renderModeRow">
+                    <div class="mk-render-row__main">
+                      <p class="mk-render-row__title">渲染模式</p>
+                      <p class="mk-render-row__desc">当前仅「菜单」支持 Sharp；其他图片功能仍走 HTML</p>
+                    </div>
+                    <div class="mk-pill-switch" role="group" aria-label="渲染模式">
+                      <button type="button" class="mk-pill-switch__btn mk-pill-switch__btn--active" data-mode="html" onclick="setRenderModePill('html')">HTML</button>
+                      <button type="button" class="mk-pill-switch__btn" data-mode="sharp" onclick="setRenderModePill('sharp')">Sharp</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="mk-settings-panel__inner mk-render-mode-field" id="sharpDepsPanel" style="margin:0 14px 14px;display:none;">
+                  <div class="mk-sharp-deps-card is-unknown" id="sharpDepsCard">
+                    <div class="mk-sharp-deps-card__head">
+                      <h4 class="mk-sharp-deps-card__title">Sharp 运行时依赖</h4>
+                      <span class="mk-sharp-deps-card__badge" id="sharpDepsBadge">检测中</span>
+                    </div>
+                    <p class="mk-sharp-deps-card__desc">安装到 data/runtime-deps（咔咔珂请在数据目录安装，勿在 plugins 目录 npm install；Windows/Linux 需分别安装）</p>
+                    <p class="mk-sharp-deps-card__status" id="sharpDepsStatusBrief">正在检测…</p>
+                    <pre class="mk-sharp-deps-card__manual" id="sharpDepsManualHint" style="display:none;white-space:pre-wrap;font-size:11px;line-height:1.45;margin:8px 0 0;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,0.06);max-height:180px;overflow:auto;"></pre>
+                    <div class="mk-sharp-deps-progress" id="sharpDepsProgressWrap" style="display:none;" aria-live="polite">
+                      <div class="broadcast-send-progress__track">
+                        <div id="sharpDepsProgressBar" class="broadcast-send-progress__bar"></div>
+                      </div>
+                      <div id="sharpDepsProgressHint" class="broadcast-send-progress__hint">准备安装…</div>
+                    </div>
+                    <div class="mk-sharp-deps-card__actions">
+                      <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" id="sharpDepsInstallBtn" onclick="installSharpDependencies()">安装 Sharp 依赖</button>
+                      <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="sharpDepsRefreshBtn" onclick="refreshSharpDepsStatus(true)">刷新状态</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="mk-settings-section">
+              <div class="mk-settings-section__head mk-settings-section__head--split">
+                <div class="mk-settings-section__head-main">
+                  <span class="mk-settings-section__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                  </span>
+                  <div>
+                    <h3 class="mk-settings-section__title">QQ 邮箱配置</h3>
+                    <p class="mk-settings-section__desc">最多 2 个账号；授权码仅首次保存时显示，后台不会回读</p>
+                  </div>
+                </div>
+                <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="qqMailRefreshBtn" onclick="refreshQqMailStatus(true)">刷新状态</button>
+              </div>
+              <div class="mk-settings-panel">
+                <div class="mk-settings-panel__inner">
+                  <div class="mk-qq-toolbar">
+                    <p class="mk-qq-toolbar__path">数据目录：筱筱吖/邮箱配置/QQ邮箱/</p>
+                  </div>
+                  <div class="mk-qq-grid" id="qqMailSlotGrid">
+                    <div class="mk-qq-slot is-empty" id="qqMailSlotCard1" data-slot="1" onclick="openQqMailConfigModal(1)" role="button" tabindex="0">
+                      <div class="mk-qq-slot__head">
+                        <span class="mk-qq-slot__index">槽位 1</span>
+                        <span class="mk-qq-slot__badge">未配置</span>
+                      </div>
+                      <p class="mk-qq-slot__email" id="qqMailSlotEmail1">点击配置</p>
+                      <div class="mk-qq-slot__meta" id="qqMailSlotMeta1"></div>
+                      <p class="mk-qq-slot__foot">点击卡片进行配置</p>
+                    </div>
+                    <div class="mk-qq-slot is-empty" id="qqMailSlotCard2" data-slot="2" onclick="openQqMailConfigModal(2)" role="button" tabindex="0">
+                      <div class="mk-qq-slot__head">
+                        <span class="mk-qq-slot__index">槽位 2</span>
+                        <span class="mk-qq-slot__badge">未配置</span>
+                      </div>
+                      <p class="mk-qq-slot__email" id="qqMailSlotEmail2">点击配置</p>
+                      <div class="mk-qq-slot__meta" id="qqMailSlotMeta2"></div>
+                      <p class="mk-qq-slot__foot">点击卡片进行配置</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="mk-settings-section">
+              <div class="mk-settings-section__head">
+                <span class="mk-settings-section__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </span>
+                <div>
+                  <h3 class="mk-settings-section__title">离线通知</h3>
+                  <p class="mk-settings-section__desc">以 NapCat/SL 协议 bot_offline 上报为准，掉线时邮件通知指定 QQ</p>
+                </div>
+              </div>
+              <div class="mk-settings-panel">
+                <div class="mk-settings-panel__inner">
+                  <p class="mk-qq-toolbar__path" style="margin:0 0 12px;padding:0;border:none;">数据目录：筱筱吖/扩展功能/离线通知/</p>
+                  <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" onclick="openOfflineNotifyModal()">离线通知配置</button>
+                  <p class="mk-offline-brief" id="offlineNotifyStatusBrief">加载中…</p>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -7386,6 +8879,92 @@
             <div id="autoLike-loading" class="mk-state">加载中…</div>
             <div id="autoLike-empty" class="mk-state" style="display:none;">暂无特定用户</div>
             <div id="autoLike-list" class="mk-switch-list" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-card-shop" class="page-content">
+        <div class="glass-card">
+          <div class="mk-panel-head">
+            <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;">
+              <div>
+                <h2 class="mk-title-lg">发卡系统</h2>
+                <p class="mk-hint" style="margin:8px 0 0;">Web 后台管理 · 全服共享商店 · 归笺兑换 · 卡密库存</p>
+              </div>
+              <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" onclick="loadCardShopPage()" title="刷新商品列表">刷新</button>
+            </div>
+            <div class="mk-seg" role="tablist" aria-label="发卡系统视图" style="margin-top:12px;">
+              <button type="button" class="mk-seg__btn mk-seg__btn--active" id="cardShopTabProductsBtn" onclick="setCardShopTab('products')" aria-selected="true">商品管理</button>
+              <button type="button" class="mk-seg__btn" id="cardShopTabLogsBtn" onclick="setCardShopTab('logs')" aria-selected="false">兑换日志</button>
+            </div>
+          </div>
+          <div class="mk-panel-body">
+            <div id="cardShopTabProducts" class="mk-cs-tab-panel is-active">
+              <div class="mk-cs-hero">
+                <div class="mk-cs-hero__icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+                </div>
+                <div>
+                  <p class="mk-cs-hero__title">机器人级总仓 · 一处维护，全群可见</p>
+                  <p class="mk-cs-hero__desc">在此添加商品、填充卡密、定价与上下架；用户通过 QQ 指令「发卡商店 / 兑换商品」购买，扣全局归笺、从共享库存发货。与授权卡密无关。</p>
+                </div>
+              </div>
+              <div class="mk-cs-stats" aria-live="polite">
+                <div class="mk-cs-stat mk-cs-stat--accent">
+                  <span class="mk-cs-stat__label">商品种类</span>
+                  <span class="mk-cs-stat__value" id="csStatProducts">—</span>
+                </div>
+                <div class="mk-cs-stat mk-cs-stat--ok">
+                  <span class="mk-cs-stat__label">在售</span>
+                  <span class="mk-cs-stat__value" id="csStatOnShelf">—</span>
+                </div>
+                <div class="mk-cs-stat">
+                  <span class="mk-cs-stat__label">库存合计</span>
+                  <span class="mk-cs-stat__value" id="csStatStock">—</span>
+                </div>
+                <div class="mk-cs-stat">
+                  <span class="mk-cs-stat__label">已定价</span>
+                  <span class="mk-cs-stat__value" id="csStatPriced">—</span>
+                </div>
+              </div>
+              <div class="mk-cs-email-row" id="cardShopEmailResendRow">
+                <div class="mk-cs-email-row__main">
+                  <p class="mk-cs-email-row__title">邮箱二次发送</p>
+                  <p class="mk-cs-email-row__desc" id="cardShopEmailResendHint">兑换成功私聊发货后，同步向 QQ 邮箱（QQ号@qq.com）发送卡密文本。需同时开启本开关并在「进阶设置」配置 QQ 邮箱。</p>
+                </div>
+                <label class="toggle-switch" title="是否启用邮箱二次发送">
+                  <input type="checkbox" id="cardShopEmailResendToggle" onchange="saveCardShopEmailResendSetting()">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="mk-cs-toolbar">
+                <input type="text" id="cardShopNewName" class="mk-input" placeholder="新商品名称" autocomplete="off">
+                <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" onclick="createCardShopProduct()">添加商品</button>
+                <div class="mk-search-field">
+                  <span class="mk-search-field__icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  </span>
+                  <input type="search" id="cardShopSearch" class="mk-search-field__input" placeholder="搜索商品…" autocomplete="off" oninput="filterCardShopProducts()">
+                </div>
+              </div>
+              <div id="cardShop-loading" class="mk-state">加载中…</div>
+              <div id="cardShop-empty" class="mk-state" style="display:none;">暂无商品，请在上方添加第一个商品。</div>
+              <div id="cardShop-grid" style="display:none;margin-top:4px;"></div>
+            </div>
+            <div id="cardShopTabLogs" class="mk-cs-tab-panel">
+              <div class="mk-forward-row" style="margin-bottom:12px;">
+                <p class="mk-hint" style="margin:0;flex:1;">用户兑换记录（按时间倒序，含扣款与卡密明细）</p>
+                <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" onclick="loadCardShopLogs(1)">刷新</button>
+              </div>
+              <div id="cardShopLogs-loading" class="mk-state">加载中…</div>
+              <div id="cardShopLogs-empty" class="mk-state" style="display:none;">暂无兑换记录</div>
+              <div id="cardShopLogs-list"></div>
+              <div id="cardShopLogs-pager" class="mk-data-edit-pager" style="display:none;margin-top:12px;">
+                <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="cardShopLogsPrev" onclick="changeCardShopLogsPage(-1)">上一页</button>
+                <span id="cardShopLogsPageInfo" class="mk-data-edit-pageinfo">第 1/1 页</span>
+                <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="cardShopLogsNext" onclick="changeCardShopLogsPage(1)">下一页</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -7593,24 +9172,174 @@
       </div>
     </div>
 
+    <div id="qqMailConfigModal" class="mk-modal-overlay" style="display:none;" onclick="closeQqMailConfigModalOnOverlay(event)">
+      <div id="qqMailConfigModalContent" class="mk-modal" role="dialog" aria-modal="true" aria-labelledby="qqMailConfigTitle" onclick="event.stopPropagation()">
+        <h3 id="qqMailConfigTitle" class="mk-modal__title">配置 QQ 邮箱</h3>
+        <div id="qqMailOnceBanner" class="mk-qq-once-banner" role="status"></div>
+        <input type="hidden" id="qqMailConfigSlot" value="1">
+        <div class="mk-form-group">
+          <label class="mk-label" for="qqMailConfigEmail">QQ 邮箱</label>
+          <input type="email" id="qqMailConfigEmail" class="mk-input" placeholder="例如：123456789@qq.com" autocomplete="off">
+        </div>
+        <div class="mk-form-group">
+          <label class="mk-label" for="qqMailConfigAuth">SMTP 授权码</label>
+          <input type="password" id="qqMailConfigAuth" class="mk-input" placeholder="首次必填；留空表示不修改已有授权码" autocomplete="new-password">
+          <p class="mk-hint">授权码仅在首次设置或变更时显示一次，保存后后台无法再次查看</p>
+        </div>
+        <div class="mk-btn-row">
+          <button type="button" class="mk-btn mk-btn--primary" onclick="saveQqMailConfigFromModal()">保存</button>
+          <button type="button" class="mk-btn mk-btn--danger" id="qqMailConfigClearBtn" onclick="clearQqMailSlotFromModal()">清除配置</button>
+          <button type="button" class="mk-btn mk-btn--ghost" onclick="closeQqMailConfigModal()">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="offlineNotifyModal" class="mk-modal-overlay" style="display:none;" onclick="closeOfflineNotifyModalOnOverlay(event)">
+      <div id="offlineNotifyModalContent" class="mk-modal" role="dialog" aria-modal="true" aria-labelledby="offlineNotifyModalTitle" onclick="event.stopPropagation()">
+        <h3 id="offlineNotifyModalTitle" class="mk-modal__title">离线通知配置</h3>
+        <div class="mk-offline-toggle-row" id="offlineNotifyToggleRow">
+          <div>
+            <p class="mk-offline-toggle-row__title">启用离线邮件通知</p>
+            <p class="mk-offline-toggle-row__desc" id="offlineNotifyModalHint">需同时开启本开关、配置 QQ 邮箱，并添加至少一个通知 QQ，才会在 bot_offline 上报时发送邮件。</p>
+          </div>
+          <label class="toggle-switch" title="启用离线邮件通知">
+            <input type="checkbox" id="offlineNotifyEnabledToggle" onchange="syncOfflineNotifyModalUi()">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="offlineNotifyBody" class="mk-offline-body is-disabled">
+          <div class="mk-offline-owner-head">
+            <h4 class="mk-offline-owner-head__title">通知 QQ</h4>
+            <button type="button" class="mk-offline-owner-add" onclick="showAddOfflineNotifyQQDialog()" aria-label="添加通知 QQ">+ 添加</button>
+          </div>
+          <p class="mk-hint" style="margin-top:0;margin-bottom:10px;">掉线时将向 QQ号@qq.com 发送邮件（非主人 QQ 列表，可单独配置）</p>
+          <div id="offlineNotifyQQsList" class="mk-offline-qq-list"></div>
+        </div>
+        <div class="mk-btn-row" style="margin-top:14px;">
+          <button type="button" class="mk-btn mk-btn--primary" onclick="saveOfflineNotifyConfig()">保存</button>
+          <button type="button" class="mk-btn mk-btn--ghost" onclick="closeOfflineNotifyModal()">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="offlineNotifyQQDialog" class="mk-modal-overlay" style="display:none;" onclick="closeOfflineNotifyQQDialogOnOverlay(event)">
+      <div id="offlineNotifyQQDialogContent" class="mk-modal" role="dialog" aria-modal="true" aria-labelledby="offlineNotifyQQDialogTitle" onclick="event.stopPropagation()">
+        <h3 id="offlineNotifyQQDialogTitle" class="mk-modal__title">添加通知 QQ</h3>
+        <div class="mk-form-group">
+          <label class="mk-label" for="offlineNotifyQQDialogInput">QQ 号</label>
+          <input type="text" id="offlineNotifyQQDialogInput" class="mk-input" placeholder="输入接收通知的 QQ 号" inputmode="numeric" autocomplete="off">
+        </div>
+        <div class="mk-btn-row">
+          <button type="button" class="mk-btn mk-btn--primary" onclick="saveOfflineNotifyQQFromDialog()">确定</button>
+          <button type="button" class="mk-btn mk-btn--danger" id="offlineNotifyQQDialogDeleteBtn" style="display:none;" onclick="deleteOfflineNotifyQQFromDialog()">删除</button>
+          <button type="button" class="mk-btn mk-btn--ghost" onclick="closeOfflineNotifyQQDialog()">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pluginUpdateModal" class="mk-update-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="pluginUpdateModalTitle" aria-hidden="true" onclick="closePluginUpdateModalOnOverlay(event)">
       <div class="mk-update-modal" onclick="event.stopPropagation()">
-        <button type="button" class="mk-update-modal__close" onclick="dismissPluginUpdateModal()" aria-label="关闭">×</button>
-        <h2 id="pluginUpdateModalTitle" class="mk-update-modal__title">发现新版本</h2>
-        <div class="mk-update-modal__compare" aria-label="版本对比">
-          <div class="mk-update-modal__col">
-            <span class="mk-update-modal__label">当前版本</span>
-            <span id="pluginUpdateCurrentVer" class="mk-update-modal__ver mk-update-modal__ver--current">—</span>
+        <div class="mk-update-modal__header">
+          <div class="mk-update-modal__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
           </div>
-          <div class="mk-update-modal__arrow" aria-hidden="true">→</div>
-          <div class="mk-update-modal__col">
-            <span class="mk-update-modal__label mk-update-modal__label--latest">最新版本</span>
-            <span id="pluginUpdateLatestVer" class="mk-update-modal__ver mk-update-modal__ver--latest">—</span>
+          <div class="mk-update-modal__header-text">
+            <h2 id="pluginUpdateModalTitle" class="mk-update-modal__title">有新版本可用</h2>
+            <p class="mk-update-modal__subtitle">建议更新到最新版本以获得更好的体验和功能</p>
+          </div>
+          <button type="button" class="mk-update-modal__close" onclick="dismissPluginUpdateModal()" aria-label="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="mk-update-modal__body">
+          <div class="mk-update-modal__compare" aria-label="版本对比">
+            <div class="mk-update-modal__col">
+              <span class="mk-update-modal__label">当前版本</span>
+              <span id="pluginUpdateCurrentVer" class="mk-update-modal__ver mk-update-modal__ver--current">—</span>
+            </div>
+            <div class="mk-update-modal__arrow" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </div>
+            <div class="mk-update-modal__col mk-update-modal__col--latest">
+              <span class="mk-update-modal__label mk-update-modal__label--latest">最新版本</span>
+              <span id="pluginUpdateLatestVer" class="mk-update-modal__ver mk-update-modal__ver--latest">—</span>
+            </div>
+          </div>
+          <div class="mk-update-modal__changelog">
+            <div class="mk-update-modal__changelog-title">更新内容</div>
+            <div class="mk-update-modal__changelog-item">修复已知问题，提升稳定性</div>
+            <div class="mk-update-modal__changelog-item">优化部分功能的用户体验</div>
+            <div class="mk-update-modal__changelog-item">更多细节优化请查看更新日志</div>
           </div>
         </div>
         <div class="mk-update-modal__actions">
-          <button type="button" class="mk-update-modal__btn-later" onclick="dismissPluginUpdateModal()">稍后更新</button>
+          <button type="button" class="mk-update-modal__btn-later" onclick="dismissPluginUpdateModal()">稍后再说</button>
           <button type="button" class="mk-update-modal__btn-now" id="pluginUpdateNowBtn" onclick="openPluginUpdateDownload()">立即更新</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="cardShopModal" class="mk-modal-overlay" style="display:none;" onclick="closeCardShopModalOnOverlay(event)">
+      <div class="mk-modal mk-card-shop-modal" role="dialog" aria-modal="true" aria-labelledby="cardShopModalTitle" onclick="event.stopPropagation()">
+        <h3 id="cardShopModalTitle" class="mk-modal__title">商品配置</h3>
+        <div id="cardShopModalLoading" class="mk-state">加载中…</div>
+        <div id="cardShopModalForm" style="display:none;">
+          <div id="cardShopModalInfo" class="mk-cs-info"></div>
+          <div class="mk-form-group">
+            <label class="mk-label" for="csRenameNew">商品名称</label>
+            <div class="mk-forward-row">
+              <input type="text" id="csRenameNew" class="mk-input" autocomplete="off">
+              <button type="button" class="mk-btn mk-btn--sm" id="csRenameBtn">保存</button>
+            </div>
+          </div>
+          <div class="mk-form-group">
+            <label class="mk-label" for="csPriceInput">定价（归笺）</label>
+            <div class="mk-forward-row">
+              <input type="number" id="csPriceInput" class="mk-input" min="0" step="1" placeholder="未定价">
+              <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" id="csPriceBtn">保存</button>
+            </div>
+          </div>
+          <div class="mk-form-group">
+            <label class="mk-label">上架状态</label>
+            <div class="mk-seg" role="tablist">
+              <button type="button" class="mk-seg__btn" id="csShelfOnBtn">上架</button>
+              <button type="button" class="mk-seg__btn" id="csShelfOffBtn">下架</button>
+            </div>
+          </div>
+          <div class="mk-setting-block">
+            <h3 class="mk-setting-block__title">库存卡密</h3>
+            <p class="mk-setting-block__desc">追加时每行一条。删除：点击下方库存行可多选（再次点击取消），也会同步填入待删除框；也可在框内手动输入，每行一条。</p>
+            <label class="mk-label" for="csStockInput">追加卡密</label>
+            <textarea id="csStockInput" class="mk-input mk-textarea" rows="3" placeholder="AAAA-BBBB-1111" style="width:100%;box-sizing:border-box;margin-bottom:8px;"></textarea>
+            <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" id="csStockAppendBtn">追加到库存</button>
+            <label class="mk-label" id="csStockListLabel" style="margin-top:14px;display:block;">库存明细 · 点击多选</label>
+            <div id="csStockListBox" class="mk-cs-stock-box"></div>
+            <div class="mk-data-edit-pager" style="margin-top:8px;">
+              <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="csStockPrevBtn">上一页</button>
+              <span id="csStockPageInfo" class="mk-data-edit-pageinfo">第 1/1 页</span>
+              <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="csStockNextBtn">下一页</button>
+            </div>
+            <div class="mk-cs-remove-head">
+              <label class="mk-label" for="csStockRemove">待删除卡密</label>
+              <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="csStockRemoveClearBtn">清空待删</button>
+            </div>
+            <textarea id="csStockRemove" class="mk-input mk-textarea" rows="3" placeholder="点击上方库存行多选，或手动输入（每行一条）" style="width:100%;box-sizing:border-box;margin:8px 0;"></textarea>
+            <button type="button" class="mk-btn mk-btn--sm" id="csStockRemoveBtn">删除指定行</button>
+          </div>
+          <div class="mk-btn-row">
+            <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" id="csStockClearBtn">清空库存</button>
+            <button type="button" class="mk-btn mk-btn--sm" id="csDeleteBtn" style="color:var(--mk-danger);">删除商品</button>
+          </div>
         </div>
       </div>
     </div>
@@ -7681,6 +9410,7 @@
     <div id="secretNumberPanel" class="mk-popover mk-popover--br" style="display: none;" role="dialog" aria-label="神秘数字设置">
       <div style="font-weight:700;margin-bottom:10px;color:var(--mk-text);font-size:14px;">神秘数字设置</div>
       <input type="text" id="secretNumberFloatInput" class="mk-input" placeholder="输入神秘数字" autocomplete="off">
+      <button type="button" id="secretDeveloperModeBtn" class="mk-secret-dev-pill" onclick="toggleSecretDeveloperMode()" aria-pressed="false">开发者模式开关</button>
       <div class="mk-btn-row" style="margin-top:12px;">
         <button type="button" class="mk-btn mk-btn--primary mk-btn--sm" onclick="saveSecretNumber()">保存</button>
         <button type="button" class="mk-btn mk-btn--ghost mk-btn--sm" onclick="closeSecretNumberPanel()">关闭</button>
@@ -7727,6 +9457,19 @@
           </div>
           <label class="toggle-switch">
             <input type="checkbox" id="autoLikeToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="msgRecordRow" class="mk-deep-modal__option" style="display:none;">
+          <span class="mk-deep-modal__option-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+          </span>
+          <div class="mk-deep-modal__option-text">
+            <span class="mk-deep-modal__option-title">消息记录</span>
+            <span class="mk-deep-modal__option-desc">单独记录该好友私聊内容</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="msgRecordToggle">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -8582,6 +10325,53 @@
       return null;
     }
 
+    const SPLASH_DEFAULT_AVATAR_QQ = '864264375';
+    const SPLASH_DEFAULT_AVATAR_URL = `https://q4.qlogo.cn/g?b=qq&nk=${SPLASH_DEFAULT_AVATAR_QQ}&s=640`;
+
+    /** 开屏动画：咔咔珂/NapCat 连接成功则用机器人 QQ 头像，否则默认 */
+    async function resolveSplashBotAvatar() {
+      const fallback = {
+        connected: false,
+        qq: SPLASH_DEFAULT_AVATAR_QQ,
+        avatarUrl: SPLASH_DEFAULT_AVATAR_URL,
+        nickname: '',
+      };
+      try {
+        await resolveMkFrameworkMeta();
+        const fw = getMkFrameworkMeta();
+        if (fw && fw.authRequired) {
+          const st = await fetchMkFrameworkAuthState();
+          if (!st.authed) return fallback;
+        } else if (!fw) {
+          const bearer = getNapCatWebUiBearerToken();
+          if (!bearer) return fallback;
+        }
+        const tries = collectPluginNameTries();
+        for (const name of tries) {
+          const base = '/api/Plugin/ext/' + name;
+          try {
+            const r = await fetch(base + ROUTE_PREFIX + '/bot-info', {
+              headers: authHeaders(),
+              credentials: fw ? 'include' : 'same-origin',
+            });
+            if (!r.ok) continue;
+            const j = await r.json();
+            const uid = String(j?.data?.userId || '').trim();
+            if (!uid || !/^\d+$/.test(uid)) continue;
+            return {
+              connected: true,
+              qq: uid,
+              avatarUrl: String(j?.data?.avatarUrl || `https://q4.qlogo.cn/g?b=qq&nk=${uid}&s=640`),
+              nickname: String(j?.data?.nickname || '').trim(),
+            };
+          } catch (_) { /* 尝试下一个插件名 */ }
+        }
+      } catch (_) { /* 保持默认头像 */ }
+      return fallback;
+    }
+
+    window.mkbotResolveSplashBotAvatar = resolveSplashBotAvatar;
+
     // 调用 API
     async function apiCall(path, options = {}) {
       if (!API_BASE) {
@@ -9188,6 +10978,10 @@
         }
       } else if (pageId === 'settings') {
         loadSettings();
+      } else if (pageId === 'settings-advanced') {
+        loadAdvancedRenderSettings();
+        loadQqMailAdvancedPage();
+        loadOfflineNotifyBrief();
       } else if (pageId === 'announcement') {
         loadAnnouncement({ background: announcementLoaded });
       } else if (pageId === 'sponsor') {
@@ -9198,6 +10992,8 @@
         loadAutoLikePage();
       } else if (pageId === 'broadcast') {
         loadBroadcastPage();
+      } else if (pageId === 'card-shop') {
+        loadCardShopPage();
       } else if (pageId === 'data-edit') {
         loadDataEditPage();
       }
@@ -9623,6 +11419,488 @@
       } finally {
         if (btn) btn.disabled = false;
       }
+    }
+
+    let cardShopProducts = [];
+    let cardShopSelectedName = '';
+    let cardShopDetailPage = 1;
+    let cardShopCurrentDetail = null;
+    let cardShopLogsPage = 1;
+    let cardShopLogsTotalPages = 1;
+    let cardShopGridBound = false;
+    let cardShopModalBound = false;
+    let cardShopRemovePickSet = new Set();
+
+    function csAttrEscape(s) {
+      return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function getCardShopRemoveLinesFromTextarea() {
+      const ta = document.getElementById('csStockRemove');
+      return (ta?.value || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    }
+
+    function syncCardShopRemovePickFromTextarea() {
+      cardShopRemovePickSet = new Set(getCardShopRemoveLinesFromTextarea());
+      refreshCardShopStockRowPickUi();
+    }
+
+    function syncCardShopRemoveTextareaFromPick() {
+      const ta = document.getElementById('csStockRemove');
+      if (ta) ta.value = Array.from(cardShopRemovePickSet).join('\n');
+      refreshCardShopStockRowPickUi();
+    }
+
+    function toggleCardShopRemovePick(line) {
+      const key = String(line || '').trim();
+      if (!key) return;
+      if (cardShopRemovePickSet.has(key)) cardShopRemovePickSet.delete(key);
+      else cardShopRemovePickSet.add(key);
+      syncCardShopRemoveTextareaFromPick();
+    }
+
+    function refreshCardShopStockRowPickUi() {
+      const stockBox = document.getElementById('csStockListBox');
+      if (!stockBox) return;
+      stockBox.querySelectorAll('[data-stock-line]').forEach((el) => {
+        const line = el.getAttribute('data-stock-line') || '';
+        el.classList.toggle('is-pick', cardShopRemovePickSet.has(line));
+        el.setAttribute('aria-pressed', cardShopRemovePickSet.has(line) ? 'true' : 'false');
+      });
+    }
+
+    function clearCardShopRemovePick() {
+      cardShopRemovePickSet.clear();
+      syncCardShopRemoveTextareaFromPick();
+    }
+
+    function resetCardShopRemovePickForProduct(name) {
+      cardShopRemovePickSet.clear();
+      const ta = document.getElementById('csStockRemove');
+      if (ta) ta.value = '';
+      if (cardShopCurrentDetail?.name === name) refreshCardShopStockRowPickUi();
+    }
+
+    function bindCardShopGridEvents() {
+      const grid = document.getElementById('cardShop-grid');
+      if (!grid || cardShopGridBound) return;
+      cardShopGridBound = true;
+      grid.addEventListener('click', (e) => {
+        const card = e.target.closest('[data-product-name]');
+        if (!card) return;
+        selectCardShopProduct(card.getAttribute('data-product-name') || '');
+      });
+    }
+
+    function bindCardShopNewNameEnter() {
+      const input = document.getElementById('cardShopNewName');
+      if (!input || input.dataset.csEnterBound) return;
+      input.dataset.csEnterBound = '1';
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          createCardShopProduct();
+        }
+      });
+    }
+
+    function bindCardShopModalEvents() {
+      if (cardShopModalBound) return;
+      cardShopModalBound = true;
+      document.getElementById('csRenameBtn')?.addEventListener('click', renameCardShopProduct);
+      document.getElementById('csPriceBtn')?.addEventListener('click', saveCardShopPrice);
+      document.getElementById('csShelfOnBtn')?.addEventListener('click', () => setCardShopShelf(true));
+      document.getElementById('csShelfOffBtn')?.addEventListener('click', () => setCardShopShelf(false));
+      document.getElementById('csStockAppendBtn')?.addEventListener('click', appendCardShopStock);
+      document.getElementById('csStockRemoveBtn')?.addEventListener('click', removeCardShopStock);
+      document.getElementById('csStockRemoveClearBtn')?.addEventListener('click', clearCardShopRemovePick);
+      document.getElementById('csStockClearBtn')?.addEventListener('click', clearCardShopStock);
+      document.getElementById('csDeleteBtn')?.addEventListener('click', deleteCardShopProduct);
+      document.getElementById('csStockRemove')?.addEventListener('input', syncCardShopRemovePickFromTextarea);
+      const stockBox = document.getElementById('csStockListBox');
+      stockBox?.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-stock-line]');
+        if (!row) return;
+        toggleCardShopRemovePick(row.getAttribute('data-stock-line') || '');
+      });
+      stockBox?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const row = e.target.closest('[data-stock-line]');
+        if (!row) return;
+        e.preventDefault();
+        toggleCardShopRemovePick(row.getAttribute('data-stock-line') || '');
+      });
+      document.getElementById('csStockPrevBtn')?.addEventListener('click', () => {
+        if (cardShopCurrentDetail) loadCardShopDetail(cardShopCurrentDetail.name, cardShopCurrentDetail.stockPage - 1);
+      });
+      document.getElementById('csStockNextBtn')?.addEventListener('click', () => {
+        if (cardShopCurrentDetail) loadCardShopDetail(cardShopCurrentDetail.name, cardShopCurrentDetail.stockPage + 1);
+      });
+    }
+
+    function openCardShopModal() {
+      const modal = document.getElementById('cardShopModal');
+      if (modal) modal.style.display = 'flex';
+    }
+
+    function closeCardShopModal() {
+      const modal = document.getElementById('cardShopModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function closeCardShopModalOnOverlay(event) {
+      if (event.target.id === 'cardShopModal') closeCardShopModal();
+    }
+
+    function setCardShopTab(tab) {
+      const isProducts = tab === 'products';
+      document.getElementById('cardShopTabProducts').classList.toggle('is-active', isProducts);
+      document.getElementById('cardShopTabLogs').classList.toggle('is-active', !isProducts);
+      document.getElementById('cardShopTabProductsBtn').classList.toggle('mk-seg__btn--active', isProducts);
+      document.getElementById('cardShopTabLogsBtn').classList.toggle('mk-seg__btn--active', !isProducts);
+      document.getElementById('cardShopTabProductsBtn').setAttribute('aria-selected', isProducts ? 'true' : 'false');
+      document.getElementById('cardShopTabLogsBtn').setAttribute('aria-selected', !isProducts ? 'true' : 'false');
+      if (!isProducts) loadCardShopLogs(1);
+    }
+
+    function renderCardShopModal(d) {
+      cardShopCurrentDetail = d;
+      const title = document.getElementById('cardShopModalTitle');
+      const info = document.getElementById('cardShopModalInfo');
+      const rename = document.getElementById('csRenameNew');
+      const price = document.getElementById('csPriceInput');
+      const shelfOn = document.getElementById('csShelfOnBtn');
+      const shelfOff = document.getElementById('csShelfOffBtn');
+      const stockLabel = document.getElementById('csStockListLabel');
+      const stockBox = document.getElementById('csStockListBox');
+      const stockPageInfo = document.getElementById('csStockPageInfo');
+      const stockPrev = document.getElementById('csStockPrevBtn');
+      const stockNext = document.getElementById('csStockNextBtn');
+      if (title) title.textContent = d.name;
+      if (info) {
+        const priceText = d.price != null ? `${d.price} 归笺` : '未定价';
+        info.innerHTML = `代号 <strong>${escapeHtml(d.code)}</strong> · ${escapeHtml(priceText)} · 库存 <strong>${d.stock}</strong> 条 · ${d.onShelf ? '在售' : '已下架'}`;
+      }
+      if (rename) rename.value = d.name;
+      if (price) price.value = d.price != null ? d.price : '';
+      if (shelfOn) shelfOn.classList.toggle('mk-seg__btn--active', !!d.onShelf);
+      if (shelfOff) shelfOff.classList.toggle('mk-seg__btn--active', !d.onShelf);
+      if (stockLabel) stockLabel.textContent = `库存明细 · 点击多选（${d.stockPage}/${d.stockTotalPages} 页）`;
+      if (stockBox) {
+        const rows = d.stockLines || [];
+        stockBox.innerHTML = rows.length
+          ? rows.map((row) => {
+              const picked = cardShopRemovePickSet.has(row.line) ? ' is-pick' : '';
+              const pressed = cardShopRemovePickSet.has(row.line) ? 'true' : 'false';
+              return `<div class="mk-cs-stock-row mk-cs-stock-row--pickable${picked}" role="button" tabindex="0" aria-pressed="${pressed}" data-stock-line="${csAttrEscape(row.line)}" title="点击加入/移出待删除">${row.index}. ${escapeHtml(row.line)}</div>`;
+            }).join('')
+          : '<div class="mk-cs-stock-row" style="color:var(--mk-text-muted)">暂无卡密</div>';
+      }
+      if (stockPageInfo) stockPageInfo.textContent = `第 ${d.stockPage}/${d.stockTotalPages} 页`;
+      if (stockPrev) stockPrev.disabled = d.stockPage <= 1;
+      if (stockNext) stockNext.disabled = d.stockPage >= d.stockTotalPages;
+    }
+
+    async function loadCardShopEmailResendSetting() {
+      const toggle = document.getElementById('cardShopEmailResendToggle');
+      const hint = document.getElementById('cardShopEmailResendHint');
+      const row = document.getElementById('cardShopEmailResendRow');
+      if (!toggle) return;
+      try {
+        const r = await apiCall('/card-shop/settings/email-resend');
+        const data = r.data || {};
+        toggle.checked = !!data.enabled;
+        if (hint) {
+          if (data.enabled && !data.mailConfigured) {
+            hint.textContent = '开关已开启，但未检测到可用 QQ 邮箱配置，实际不会发送邮件。请前往「进阶设置」配置并验证邮箱。';
+            row?.classList.add('is-warn');
+          } else if (data.canSend) {
+            hint.textContent = '已启用：兑换成功后将私聊发货，并同步邮件至 QQ号@qq.com。';
+            row?.classList.remove('is-warn');
+          } else {
+            hint.textContent = '兑换成功私聊发货后，可同步向 QQ 邮箱（QQ号@qq.com）发送卡密文本。需同时开启本开关并在「进阶设置」配置 QQ 邮箱。';
+            row?.classList.remove('is-warn');
+          }
+        }
+      } catch (error) {
+        if (hint) hint.textContent = '加载邮箱二次发送设置失败：' + (error.message || 'unknown');
+      }
+    }
+
+    async function saveCardShopEmailResendSetting() {
+      const toggle = document.getElementById('cardShopEmailResendToggle');
+      if (!toggle) return;
+      try {
+        const r = await apiCall('/card-shop/settings/email-resend', {
+          method: 'POST',
+          body: JSON.stringify({ enabled: !!toggle.checked }),
+        });
+        await loadCardShopEmailResendSetting();
+        const data = r.data || {};
+        if (data.enabled && !data.mailConfigured) {
+          showToast('已开启，但未配置 QQ 邮箱，暂不会发送', 'info');
+        } else {
+          showToast(data.enabled ? '已启用邮箱二次发送' : '已关闭邮箱二次发送', 'success');
+        }
+      } catch (error) {
+        showToast('保存失败：' + (error.message || 'unknown'), 'error');
+        await loadCardShopEmailResendSetting();
+      }
+    }
+
+    async function loadCardShopPage() {
+      bindCardShopGridEvents();
+      bindCardShopNewNameEnter();
+      bindCardShopModalEvents();
+      const loading = document.getElementById('cardShop-loading');
+      const empty = document.getElementById('cardShop-empty');
+      const grid = document.getElementById('cardShop-grid');
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      grid.style.display = 'none';
+      try {
+        const r = await apiCall('/card-shop/products');
+        cardShopProducts = r.data?.list || [];
+        const s = r.data?.summary || {};
+        document.getElementById('csStatProducts').textContent = s.productCount ?? 0;
+        document.getElementById('csStatOnShelf').textContent = s.onShelfCount ?? 0;
+        document.getElementById('csStatStock').textContent = s.totalStock ?? 0;
+        document.getElementById('csStatPriced').textContent = s.pricedCount ?? 0;
+        filterCardShopProducts();
+        await loadCardShopEmailResendSetting();
+      } catch (e) {
+        showToast('加载发卡系统失败: ' + (e?.message || e), 'error');
+        cardShopProducts = [];
+        filterCardShopProducts();
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+
+    function filterCardShopProducts() {
+      const q = (document.getElementById('cardShopSearch')?.value || '').trim().toLowerCase();
+      const list = q ? cardShopProducts.filter((p) => String(p.name).toLowerCase().includes(q)) : cardShopProducts;
+      const empty = document.getElementById('cardShop-empty');
+      const grid = document.getElementById('cardShop-grid');
+      if (!list.length) {
+        empty.style.display = 'block';
+        grid.style.display = 'none';
+        grid.innerHTML = '';
+        return;
+      }
+      empty.style.display = 'none';
+      grid.style.display = 'grid';
+      grid.innerHTML = list.map((p) => {
+        const priceText = p.price != null ? `${p.price} 归笺` : '未定价';
+        const active = p.name === cardShopSelectedName ? ' is-active' : '';
+        const statusClass = p.onShelf ? ' is-on' : ' is-off';
+        const statusText = p.onShelf ? '在售' : '下架';
+        const priceClass = p.price != null ? '' : ' style="color:var(--mk-text-muted)"';
+        return `<div class="mk-entity-card mk-entity-card--shop${active}" role="button" tabindex="0" data-product-name="${csAttrEscape(p.name)}">
+          <div class="mk-entity-card__main">
+            <div class="mk-entity-card__text">
+              <div class="mk-entity-card__name">${escapeHtml(p.name)}</div>
+              <div class="mk-entity-card__id">代号 ${escapeHtml(p.code)}</div>
+              <div class="mk-entity-card__id"${priceClass}>${escapeHtml(priceText)} · 库存 ${p.stock} 条</div>
+            </div>
+          </div>
+          <span class="mk-entity-card__status${statusClass}">${statusText}</span>
+        </div>`;
+      }).join('');
+    }
+
+    async function selectCardShopProduct(name) {
+      if (!name) return;
+      cardShopSelectedName = name;
+      cardShopDetailPage = 1;
+      filterCardShopProducts();
+      await loadCardShopDetail(name, 1);
+    }
+
+    async function loadCardShopDetail(name, page) {
+      if (!name) return;
+      const prevName = cardShopSelectedName;
+      cardShopSelectedName = name;
+      if (prevName && prevName !== name) resetCardShopRemovePickForProduct(name);
+      openCardShopModal();
+      const loading = document.getElementById('cardShopModalLoading');
+      const form = document.getElementById('cardShopModalForm');
+      if (loading) {
+        loading.textContent = '加载中…';
+        loading.style.display = 'block';
+      }
+      if (form) form.style.display = 'none';
+      try {
+        const r = await apiCall('/card-shop/product?name=' + encodeURIComponent(name) + '&page=' + page + '&pageSize=40');
+        const d = r.data;
+        if (!d) throw new Error('无商品数据');
+        cardShopDetailPage = d.stockPage || 1;
+        renderCardShopModal(d);
+        if (loading) loading.style.display = 'none';
+        if (form) form.style.display = 'block';
+      } catch (e) {
+        if (loading) loading.innerHTML = '加载失败: ' + escapeHtml(e?.message || e);
+        showToast('加载商品失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function createCardShopProduct() {
+      const name = (document.getElementById('cardShopNewName')?.value || '').trim();
+      if (!name) { showToast('请输入商品名称', 'error'); return; }
+      try {
+        const r = await apiCall('/card-shop/product/create', { method: 'POST', body: JSON.stringify({ name }) });
+        showToast('已添加商品，代号 ' + (r.data?.code || ''), 'success');
+        document.getElementById('cardShopNewName').value = '';
+        await loadCardShopPage();
+        await selectCardShopProduct(name);
+      } catch (e) {
+        showToast('添加失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function renameCardShopProduct() {
+      const newName = (document.getElementById('csRenameNew')?.value || '').trim();
+      if (!cardShopSelectedName || !newName) { showToast('名称不能为空', 'error'); return; }
+      try {
+        await apiCall('/card-shop/product/rename', { method: 'POST', body: JSON.stringify({ oldName: cardShopSelectedName, newName }) });
+        showToast('已重命名', 'success');
+        cardShopSelectedName = newName;
+        await loadCardShopPage();
+        await loadCardShopDetail(newName, 1);
+      } catch (e) {
+        showToast('重命名失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function saveCardShopPrice() {
+      const price = Number(document.getElementById('csPriceInput')?.value);
+      if (!cardShopSelectedName) return;
+      if (!Number.isFinite(price) || price < 0) { showToast('请输入有效价格', 'error'); return; }
+      try {
+        await apiCall('/card-shop/product/price', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName, price }) });
+        showToast('价格已保存', 'success');
+        await loadCardShopPage();
+        await loadCardShopDetail(cardShopSelectedName, cardShopDetailPage);
+      } catch (e) {
+        showToast('保存失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function setCardShopShelf(onShelf) {
+      if (!cardShopSelectedName) return;
+      try {
+        await apiCall('/card-shop/product/shelf', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName, onShelf: !!onShelf }) });
+        showToast(onShelf ? '已上架' : '已下架', 'success');
+        await loadCardShopPage();
+        await loadCardShopDetail(cardShopSelectedName, cardShopDetailPage);
+      } catch (e) {
+        showToast('操作失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function appendCardShopStock() {
+      const lines = document.getElementById('csStockInput')?.value || '';
+      if (!cardShopSelectedName) return;
+      try {
+        const r = await apiCall('/card-shop/product/stock/append', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName, lines }) });
+        const d = r.data || {};
+        let msg = '已添加 ' + (d.added || 0) + ' 条';
+        if (d.dupStock?.length) msg += '，跳过重复 ' + d.dupStock.length + ' 条';
+        showToast(msg, 'success');
+        document.getElementById('csStockInput').value = '';
+        await loadCardShopPage();
+        await loadCardShopDetail(cardShopSelectedName, 1);
+      } catch (e) {
+        showToast('添加失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function removeCardShopStock() {
+      const lines = document.getElementById('csStockRemove')?.value || '';
+      if (!cardShopSelectedName) return;
+      try {
+        const r = await apiCall('/card-shop/product/stock/remove', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName, lines }) });
+        showToast('已删除 ' + (r.data?.removed || 0) + ' 条', 'success');
+        clearCardShopRemovePick();
+        await loadCardShopPage();
+        await loadCardShopDetail(cardShopSelectedName, cardShopDetailPage);
+      } catch (e) {
+        showToast('删除失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function clearCardShopStock() {
+      if (!cardShopSelectedName) return;
+      if (!confirm('确定清空「' + cardShopSelectedName + '」的全部卡密库存？')) return;
+      try {
+        await apiCall('/card-shop/product/stock/clear', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName }) });
+        showToast('库存已清空', 'success');
+        await loadCardShopPage();
+        await loadCardShopDetail(cardShopSelectedName, 1);
+      } catch (e) {
+        showToast('清空失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function deleteCardShopProduct() {
+      if (!cardShopSelectedName) return;
+      if (!confirm('确定删除商品「' + cardShopSelectedName + '」？')) return;
+      try {
+        await apiCall('/card-shop/product/delete', { method: 'POST', body: JSON.stringify({ name: cardShopSelectedName }) });
+        showToast('商品已删除', 'success');
+        cardShopSelectedName = '';
+        closeCardShopModal();
+        await loadCardShopPage();
+      } catch (e) {
+        showToast('删除失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    async function loadCardShopLogs(page) {
+      cardShopLogsPage = Math.max(1, page || 1);
+      const loading = document.getElementById('cardShopLogs-loading');
+      const empty = document.getElementById('cardShopLogs-empty');
+      const list = document.getElementById('cardShopLogs-list');
+      const pager = document.getElementById('cardShopLogs-pager');
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      list.innerHTML = '';
+      pager.style.display = 'none';
+      try {
+        const r = await apiCall('/card-shop/logs?page=' + cardShopLogsPage + '&pageSize=25');
+        const d = r.data || {};
+        cardShopLogsTotalPages = d.totalPages || 1;
+        loading.style.display = 'none';
+        if (!d.list?.length) {
+          empty.style.display = 'block';
+          return;
+        }
+        list.innerHTML = d.list.map((row) => {
+          const cards = (row.cards || []).map((c, i) => `${i + 1}. ${escapeHtml(c)}`).join('<br>');
+          const spent = row.before - row.after;
+          return `<article class="mk-cs-log-card">
+            <div class="mk-cs-log-card__head">
+              <span class="mk-cs-log-card__time">${escapeHtml(row.time || '—')}</span>
+              <span class="mk-cs-log-card__qq">QQ ${escapeHtml(row.qq)}</span>
+              <span class="mk-cs-log-card__money">扣 ${spent} 归笺 · 余 ${row.after}</span>
+            </div>
+            <p class="mk-cs-log-card__codes">${cards || '（无卡密记录）'}</p>
+          </article>`;
+        }).join('');
+        document.getElementById('cardShopLogsPageInfo').textContent = `第 ${d.page}/${d.totalPages} 页 · 共 ${d.total} 条`;
+        pager.style.display = 'flex';
+        document.getElementById('cardShopLogsPrev').disabled = d.page <= 1;
+        document.getElementById('cardShopLogsNext').disabled = d.page >= d.totalPages;
+      } catch (e) {
+        loading.style.display = 'none';
+        showToast('加载日志失败: ' + (e?.message || e), 'error');
+      }
+    }
+
+    function changeCardShopLogsPage(delta) {
+      const next = cardShopLogsPage + delta;
+      if (next < 1 || next > cardShopLogsTotalPages) return;
+      loadCardShopLogs(next);
     }
 
     async function loadAutoLikePage() {
@@ -10654,12 +12932,68 @@
       hidePluginUpdateModal();
     }
 
+    const MKBOT_DEV_MODE_KEY = 'mkbot_developer_mode';
+
+    function isMkbotDeveloperMode() {
+      try {
+        return localStorage.getItem(MKBOT_DEV_MODE_KEY) === '1';
+      } catch {
+        return false;
+      }
+    }
+
+    function setMkbotDeveloperMode(enabled) {
+      try {
+        if (enabled) localStorage.setItem(MKBOT_DEV_MODE_KEY, '1');
+        else localStorage.removeItem(MKBOT_DEV_MODE_KEY);
+      } catch { /* ignore */ }
+      syncSecretDeveloperModeUi();
+      if (enabled) {
+        checkPluginVersionInDeveloperMode();
+      }
+    }
+
+    function syncSecretDeveloperModeUi() {
+      const btn = document.getElementById('secretDeveloperModeBtn');
+      if (!btn) return;
+      const on = isMkbotDeveloperMode();
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+
+    function toggleSecretDeveloperMode() {
+      setMkbotDeveloperMode(!isMkbotDeveloperMode());
+    }
+
+    async function checkPluginVersionInDeveloperMode() {
+      if (!isMkbotDeveloperMode()) return;
+      try {
+        const data = await apiCall('/plugin-version', { cache: 'no-store', timeoutMs: 12000 });
+        const info = data?.data || {};
+        const current = String(info.current || '').trim() || '—';
+        const latest = String(info.latest || '').trim() || current;
+        showPluginUpdateModal(current, latest, info.downloadUrl);
+      } catch (e) {
+        debug('[WARN] 开发者模式版本预览失败: ' + (e?.message || e));
+        showPluginUpdateModal('—', 'dev-preview', '');
+      }
+    }
+
     /** 打开公告页时检查远程最新版（与 QQ 内「获取账号信息」同源接口） */
     async function checkPluginVersionOnAnnouncePage() {
       try {
         const data = await apiCall('/plugin-version', { cache: 'no-store', timeoutMs: 12000 });
         const info = data?.data;
-        if (!info || !info.hasUpdate) return;
+        if (!info) return;
+
+        if (isMkbotDeveloperMode()) {
+          const current = String(info.current || '').trim() || '—';
+          const latest = String(info.latest || '').trim() || current;
+          showPluginUpdateModal(current, latest, info.downloadUrl);
+          return;
+        }
+
+        if (!info.hasUpdate) return;
         const latest = String(info.latest || '').trim();
         const current = String(info.current || '').trim();
         if (!latest || !current || compareMkbotVersions(latest, current) <= 0) return;
@@ -11017,11 +13351,11 @@
         .map((item, order) => {
           const uiType = normalizeSponsorUiType(item?.uiType);
           const qq = String(item?.qq ?? '').trim();
-          const amountNum = Number(item?.amount);
           return {
             name: String(item?.name ?? '').trim() || '匿名赞助者',
             qq,
-            amount: Number.isFinite(amountNum) ? amountNum : 0,
+            // 金额单位由远程 JSON 自带，前端原样展示，不再拼 ¥/元
+            amount: item?.amount,
             thanks: String(item?.thanks ?? '').trim(),
             priority: Number.isFinite(Number(item?.priority)) ? Number(item.priority) : 999,
             uiType,
@@ -11039,9 +13373,14 @@
     }
 
     function formatSponsorAmount(amount) {
+      if (amount == null) return '0';
+      if (typeof amount === 'string') {
+        const s = amount.trim();
+        if (s) return s;
+      }
       const n = Number(amount);
-      if (!Number.isFinite(n)) return '0.00';
-      return n.toFixed(2);
+      if (!Number.isFinite(n)) return String(amount ?? '0');
+      return Number.isInteger(n) ? String(n) : String(n);
     }
 
     function sponsorTierClass(uiType) {
@@ -11069,9 +13408,10 @@
         ? '<div class="sponsor-card__spectrum" aria-hidden="true"></div>'
         : '';
 
+      const amountText = escapeHtml(formatSponsorAmount(item.amount));
       const amountHtml = tier === 'rainbow'
-        ? `<div class="sponsor-card__amount"><span class="sponsor-card__amount-all">¥${formatSponsorAmount(item.amount)}元</span></div>`
-        : `<div class="sponsor-card__amount">¥${formatSponsorAmount(item.amount)}<span class="sponsor-card__amount-unit">元</span></div>`;
+        ? `<div class="sponsor-card__amount"><span class="sponsor-card__amount-all">${amountText}</span></div>`
+        : `<div class="sponsor-card__amount">${amountText}</div>`;
 
       card.innerHTML = `
         ${spectrumHtml}
@@ -11140,6 +13480,7 @@
 
     // HTML 转义函数
     function escapeHtml(text) {
+      const s = String(text ?? '');
       const map = {
         '&': '&amp;',
         '<': '&lt;',
@@ -11147,7 +13488,7 @@
         '"': '&quot;',
         "'": '&#039;'
       };
-      return text.replace(/[&<>"']/g, m => map[m]);
+      return s.replace(/[&<>"']/g, m => map[m]);
     }
 
     // 时间管理相关变量
@@ -11458,6 +13799,586 @@
     }
 
     // 初始化
+
+    let qqMailSlots = [];
+    let offlineNotifyQQs = [];
+    let offlineNotifyMailConfigured = false;
+    let editingOfflineNotifyIndex = -1;
+
+    const QQ_MAIL_STATUS_LABEL = {
+      empty: '未配置',
+      incomplete: '未完整',
+      unknown: '待验证',
+      ok: '可用',
+      fail: '验证失败',
+    };
+
+    function qqMailStatusClass(status) {
+      if (status === 'ok') return 'is-ok';
+      if (status === 'fail' || status === 'incomplete') return 'is-fail';
+      if (status === 'unknown') return 'is-unknown';
+      return 'is-empty';
+    }
+
+    function qqMailMetaRow(label, value) {
+      const safe = escapeHtml(String(value ?? '—'));
+      return `<div class="mk-qq-slot__row"><span class="mk-qq-slot__row-label">${label}</span><span class="mk-qq-slot__row-value">${safe}</span></div>`;
+    }
+
+    function renderQqMailSlots() {
+      for (let slot = 1; slot <= 2; slot++) {
+        const item = qqMailSlots.find((s) => Number(s.slot) === slot) || {
+          slot,
+          email: '',
+          hasAuth: false,
+          configured: false,
+          status: 'empty',
+          statusMsg: '',
+          lastCheckAt: null,
+        };
+        const card = document.getElementById('qqMailSlotCard' + slot);
+        const emailEl = document.getElementById('qqMailSlotEmail' + slot);
+        const metaEl = document.getElementById('qqMailSlotMeta' + slot);
+        if (!card || !emailEl || !metaEl) continue;
+
+        card.className = 'mk-qq-slot ' + qqMailStatusClass(item.status);
+        emailEl.textContent = item.email || '点击配置';
+        const badge = card.querySelector('.mk-qq-slot__badge');
+        if (badge) badge.textContent = QQ_MAIL_STATUS_LABEL[item.status] || '未配置';
+
+        let checkText = '—';
+        if (item.lastCheckAt) {
+          try {
+            checkText = new Date(item.lastCheckAt).toLocaleString();
+          } catch {
+            checkText = String(item.lastCheckAt);
+          }
+        }
+
+        metaEl.innerHTML = [
+          qqMailMetaRow('授权码', item.hasAuth ? '已保存' : '未设置'),
+          qqMailMetaRow('检测结果', item.statusMsg || '—'),
+          qqMailMetaRow('最近检测', checkText),
+        ].join('');
+      }
+    }
+
+    async function loadQqMailAdvancedPage() {
+      try {
+        const r = await apiCall('/qq-mail/slots', { timeoutMs: 20000 });
+        qqMailSlots = Array.isArray(r.data?.slots) ? r.data.slots : [];
+        renderQqMailSlots();
+      } catch (error) {
+        showToast('加载 QQ 邮箱配置失败：' + (error.message || 'unknown'), 'error');
+      }
+    }
+
+    function openQqMailConfigModal(slot) {
+      const n = Number(slot);
+      if (n !== 1 && n !== 2) return;
+      const item = qqMailSlots.find((s) => Number(s.slot) === n) || {};
+      document.getElementById('qqMailConfigSlot').value = String(n);
+      document.getElementById('qqMailConfigTitle').textContent = '配置 QQ 邮箱 · 槽位 ' + n;
+      document.getElementById('qqMailConfigEmail').value = item.email || '';
+      document.getElementById('qqMailConfigAuth').value = '';
+      const banner = document.getElementById('qqMailOnceBanner');
+      if (banner) {
+        banner.classList.remove('is-visible');
+        banner.textContent = '';
+      }
+      document.getElementById('qqMailConfigModal').style.display = 'flex';
+      document.getElementById('qqMailConfigEmail').focus();
+    }
+
+    function closeQqMailConfigModal() {
+      document.getElementById('qqMailConfigModal').style.display = 'none';
+      document.getElementById('qqMailConfigAuth').value = '';
+    }
+
+    function closeQqMailConfigModalOnOverlay(event) {
+      if (event.target && event.target.id === 'qqMailConfigModal') closeQqMailConfigModal();
+    }
+
+    async function saveQqMailConfigFromModal() {
+      const slot = Number(document.getElementById('qqMailConfigSlot').value);
+      const email = document.getElementById('qqMailConfigEmail').value.trim();
+      const authCode = document.getElementById('qqMailConfigAuth').value.trim();
+      try {
+        const r = await apiCall('/qq-mail/save', {
+          method: 'POST',
+          timeoutMs: 25000,
+          body: JSON.stringify({ slot, email, authCode }),
+        });
+        if (r.data?.authCodeOnce) {
+          const banner = document.getElementById('qqMailOnceBanner');
+          if (banner) {
+            banner.textContent = '授权码（仅此一次，请立即保存到安全位置）：' + r.data.authCodeOnce;
+            banner.classList.add('is-visible');
+          }
+          document.getElementById('qqMailConfigAuth').value = '';
+        } else {
+          closeQqMailConfigModal();
+        }
+        await loadQqMailAdvancedPage();
+        showToast('QQ 邮箱配置已保存', 'success');
+      } catch (error) {
+        showToast('保存失败：' + (error.message || 'unknown'), 'error');
+      }
+    }
+
+    async function clearQqMailSlotFromModal() {
+      const slot = Number(document.getElementById('qqMailConfigSlot').value);
+      if (!confirm('确定清除槽位 ' + slot + ' 的邮箱配置？授权码将一并删除。')) return;
+      try {
+        await apiCall('/qq-mail/save', {
+          method: 'POST',
+          body: JSON.stringify({ slot, clear: true }),
+        });
+        closeQqMailConfigModal();
+        await loadQqMailAdvancedPage();
+        showToast('已清除槽位 ' + slot + ' 配置', 'success');
+      } catch (error) {
+        showToast('清除失败：' + (error.message || 'unknown'), 'error');
+      }
+    }
+
+    async function refreshQqMailStatus(all) {
+      const btn = document.getElementById('qqMailRefreshBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const r = await apiCall(all ? '/qq-mail/verify-all' : '/qq-mail/verify', {
+          method: 'POST',
+          timeoutMs: 60000,
+          body: all ? '{}' : JSON.stringify({ slot: 1 }),
+        });
+        if (Array.isArray(r.data?.slots)) {
+          qqMailSlots = r.data.slots;
+        } else {
+          await loadQqMailAdvancedPage();
+        }
+        renderQqMailSlots();
+        showToast('邮箱状态已刷新', 'success');
+      } catch (error) {
+        showToast('刷新状态失败：' + (error.message || 'unknown'), 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function updateOfflineNotifyBrief(data) {
+      const el = document.getElementById('offlineNotifyStatusBrief');
+      if (!el) return;
+      const cfg = data || {};
+      el.classList.remove('is-warn');
+      if (cfg.canNotify) {
+        el.textContent = '已启用：bot_offline 上报时将邮件通知 ' + (cfg.notifyQQs?.length || 0) + ' 个 QQ。';
+      } else if (cfg.enabled && !cfg.mailConfigured) {
+        el.textContent = '开关已开启，但未配置 QQ 邮箱，实际不会发送。请先完成上方 QQ 邮箱配置。';
+        el.classList.add('is-warn');
+      } else if (cfg.enabled && !(cfg.notifyQQs?.length)) {
+        el.textContent = '开关已开启，请添加至少一个通知 QQ。';
+        el.classList.add('is-warn');
+      } else {
+        el.textContent = '未启用。点击「离线通知配置」进行设置。';
+      }
+    }
+
+    function syncOfflineNotifyModalUi() {
+      const toggle = document.getElementById('offlineNotifyEnabledToggle');
+      const body = document.getElementById('offlineNotifyBody');
+      const row = document.getElementById('offlineNotifyToggleRow');
+      const hint = document.getElementById('offlineNotifyModalHint');
+      const enabled = !!toggle?.checked;
+      if (body) body.classList.toggle('is-disabled', !enabled);
+      if (row) row.classList.remove('is-warn');
+      if (hint) {
+        if (enabled && !offlineNotifyMailConfigured) {
+          hint.textContent = '开关已开启，但未检测到可用 QQ 邮箱配置，实际不会发送邮件。请先在进阶设置配置并验证邮箱。';
+          row?.classList.add('is-warn');
+        } else if (enabled && !offlineNotifyQQs.length) {
+          hint.textContent = '请添加至少一个通知 QQ，保存后才会在 bot_offline 上报时发送邮件。';
+        } else if (enabled) {
+          hint.textContent = '已就绪：收到 NapCat/SL bot_offline 上报时将向配置的 QQ 邮箱发送通知。';
+        } else {
+          hint.textContent = '开启后可配置通知 QQ。需同时配置 QQ 邮箱才会实际发送。';
+        }
+      }
+    }
+
+    function renderOfflineNotifyQQsList() {
+      const container = document.getElementById('offlineNotifyQQsList');
+      if (!container) return;
+      if (!offlineNotifyQQs.length) {
+        container.innerHTML = '<div class="mk-placeholder-text">暂无通知 QQ，点击右上角添加</div>';
+        return;
+      }
+      container.innerHTML = offlineNotifyQQs.map((qq, index) =>
+        `<div class="mk-offline-qq-card" data-index="${index}" onclick="showEditOfflineNotifyQQDialog(${index})">${escapeHtml(qq)}</div>`
+      ).join('');
+    }
+
+    async function loadOfflineNotifyBrief() {
+      try {
+        const r = await apiCall('/offline-notify/config');
+        updateOfflineNotifyBrief(r.data || {});
+      } catch (error) {
+        const el = document.getElementById('offlineNotifyStatusBrief');
+        if (el) el.textContent = '加载离线通知状态失败：' + (error.message || 'unknown');
+      }
+    }
+
+    async function openOfflineNotifyModal() {
+      try {
+        const r = await apiCall('/offline-notify/config');
+        const data = r.data || {};
+        offlineNotifyQQs = Array.isArray(data.notifyQQs) ? data.notifyQQs.slice() : [];
+        offlineNotifyMailConfigured = !!data.mailConfigured;
+        const toggle = document.getElementById('offlineNotifyEnabledToggle');
+        if (toggle) toggle.checked = !!data.enabled;
+        renderOfflineNotifyQQsList();
+        syncOfflineNotifyModalUi();
+        document.getElementById('offlineNotifyModal').style.display = 'flex';
+      } catch (error) {
+        showToast('加载离线通知配置失败：' + (error.message || 'unknown'), 'error');
+      }
+    }
+
+    function closeOfflineNotifyModal() {
+      document.getElementById('offlineNotifyModal').style.display = 'none';
+    }
+
+    function closeOfflineNotifyModalOnOverlay(event) {
+      if (event.target && event.target.id === 'offlineNotifyModal') closeOfflineNotifyModal();
+    }
+
+    async function saveOfflineNotifyConfig() {
+      const toggle = document.getElementById('offlineNotifyEnabledToggle');
+      try {
+        const r = await apiCall('/offline-notify/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            enabled: !!toggle?.checked,
+            notifyQQs: offlineNotifyQQs,
+          }),
+        });
+        updateOfflineNotifyBrief(r.data || {});
+        syncOfflineNotifyModalUi();
+        const data = r.data || {};
+        if (data.enabled && !data.mailConfigured) {
+          showToast('已保存，但未配置 QQ 邮箱，暂不会发送', 'info');
+        } else if (data.canNotify) {
+          showToast('离线通知已启用', 'success');
+        } else {
+          showToast('离线通知配置已保存', 'success');
+        }
+      } catch (error) {
+        showToast('保存失败：' + (error.message || 'unknown'), 'error');
+      }
+    }
+
+    function showAddOfflineNotifyQQDialog() {
+      editingOfflineNotifyIndex = -1;
+      document.getElementById('offlineNotifyQQDialogTitle').textContent = '添加通知 QQ';
+      document.getElementById('offlineNotifyQQDialogInput').value = '';
+      document.getElementById('offlineNotifyQQDialogDeleteBtn').style.display = 'none';
+      document.getElementById('offlineNotifyQQDialog').style.display = 'flex';
+      document.getElementById('offlineNotifyQQDialogInput').focus();
+    }
+
+    function showEditOfflineNotifyQQDialog(index) {
+      editingOfflineNotifyIndex = index;
+      document.getElementById('offlineNotifyQQDialogTitle').textContent = '编辑通知 QQ';
+      document.getElementById('offlineNotifyQQDialogInput').value = offlineNotifyQQs[index] || '';
+      document.getElementById('offlineNotifyQQDialogDeleteBtn').style.display = 'block';
+      document.getElementById('offlineNotifyQQDialog').style.display = 'flex';
+      document.getElementById('offlineNotifyQQDialogInput').focus();
+    }
+
+    function closeOfflineNotifyQQDialog() {
+      document.getElementById('offlineNotifyQQDialog').style.display = 'none';
+      editingOfflineNotifyIndex = -1;
+    }
+
+    function closeOfflineNotifyQQDialogOnOverlay(event) {
+      if (event.target && event.target.id === 'offlineNotifyQQDialog') closeOfflineNotifyQQDialog();
+    }
+
+    function saveOfflineNotifyQQFromDialog() {
+      const input = document.getElementById('offlineNotifyQQDialogInput').value.trim().replace(/\D/g, '');
+      if (!input || !/^\d{5,12}$/.test(input)) {
+        showToast('请输入有效的 QQ 号', 'error');
+        return;
+      }
+      if (editingOfflineNotifyIndex === -1) {
+        if (offlineNotifyQQs.includes(input)) {
+          showToast('该 QQ 已在列表中', 'error');
+          return;
+        }
+        offlineNotifyQQs.push(input);
+      } else {
+        if (offlineNotifyQQs.includes(input) && offlineNotifyQQs[editingOfflineNotifyIndex] !== input) {
+          showToast('该 QQ 已在列表中', 'error');
+          return;
+        }
+        offlineNotifyQQs[editingOfflineNotifyIndex] = input;
+      }
+      renderOfflineNotifyQQsList();
+      syncOfflineNotifyModalUi();
+      closeOfflineNotifyQQDialog();
+    }
+
+    function deleteOfflineNotifyQQFromDialog() {
+      if (editingOfflineNotifyIndex < 0) return;
+      if (confirm('确定删除通知 QQ ' + offlineNotifyQQs[editingOfflineNotifyIndex] + ' 吗？')) {
+        offlineNotifyQQs.splice(editingOfflineNotifyIndex, 1);
+        renderOfflineNotifyQQsList();
+        syncOfflineNotifyModalUi();
+        closeOfflineNotifyQQDialog();
+      }
+    }
+
+    let mkImageRenderEnabled = false;
+    let mkRenderMode = 'html';
+
+    function syncImageRenderRowUi() {
+      const row = document.getElementById('imageRenderRow');
+      const btn = document.getElementById('imageRenderBtn');
+      if (!btn) return;
+      btn.textContent = mkImageRenderEnabled ? '已开启' : '已关闭';
+      btn.classList.toggle('is-on', mkImageRenderEnabled);
+      if (row) row.classList.toggle('is-on', mkImageRenderEnabled);
+    }
+
+    function syncRenderModePillUi() {
+      document.querySelectorAll('#page-settings-advanced .mk-pill-switch__btn').forEach((btn) => {
+        btn.classList.toggle('mk-pill-switch__btn--active', btn.dataset.mode === mkRenderMode);
+      });
+      const row = document.getElementById('renderModeRow');
+      if (row) row.classList.toggle('is-on', mkRenderMode === 'sharp');
+    }
+
+    async function toggleImageRender() {
+      mkImageRenderEnabled = !mkImageRenderEnabled;
+      syncImageRenderRowUi();
+      await saveAdvancedRenderSettings();
+    }
+
+    async function setRenderModePill(mode) {
+      mkRenderMode = mode === 'sharp' ? 'sharp' : 'html';
+      syncRenderModePillUi();
+      syncSharpDepsPanelVisibility();
+      await saveAdvancedRenderSettings();
+      if (mkRenderMode === 'sharp') refreshSharpDepsStatus(false);
+    }
+
+    async function loadAdvancedRenderSettings() {
+      try {
+        const data = await apiCall('/config');
+        const config = data.data || {};
+        mkImageRenderEnabled = !!(config.图片渲染 ?? config.cs_of ?? false);
+        const mode = String(config.渲染模式 || 'html').toLowerCase();
+        mkRenderMode = (mode === 'sharp' || mode === 'python' || mode === 'py') ? 'sharp' : 'html';
+        syncImageRenderRowUi();
+        syncRenderModePillUi();
+        syncSharpDepsPanelVisibility();
+        refreshSharpDepsStatus(false);
+      } catch (error) {
+        debug('[ERROR] 加载图片渲染设置失败: ' + error.message);
+      }
+    }
+
+    function syncSharpDepsPanelVisibility() {
+      const panel = document.getElementById('sharpDepsPanel');
+      if (!panel) return;
+      panel.style.display = mkRenderMode === 'sharp' ? '' : 'none';
+    }
+
+    let sharpDepsPollTimer = null;
+    let sharpDepsPollFailStreak = 0;
+
+    function stopSharpDepsPoll() {
+      if (sharpDepsPollTimer) {
+        clearInterval(sharpDepsPollTimer);
+        sharpDepsPollTimer = null;
+      }
+      sharpDepsPollFailStreak = 0;
+    }
+
+    function applySharpDepsUi(s, options = {}) {
+      const card = document.getElementById('sharpDepsCard');
+      const badge = document.getElementById('sharpDepsBadge');
+      const brief = document.getElementById('sharpDepsStatusBrief');
+      const manualHint = document.getElementById('sharpDepsManualHint');
+      const btn = document.getElementById('sharpDepsInstallBtn');
+      const refreshBtn = document.getElementById('sharpDepsRefreshBtn');
+      const progressWrap = document.getElementById('sharpDepsProgressWrap');
+      const progressBar = document.getElementById('sharpDepsProgressBar');
+      const progressHint = document.getElementById('sharpDepsProgressHint');
+      if (!card || !brief || !btn) return;
+
+      const installing = !!s.installing;
+      const available = !!s.available;
+      const failed = s.phase === 'failed';
+
+      card.classList.remove('is-ok', 'is-warn', 'is-fail', 'is-running', 'is-unknown');
+      if (installing) card.classList.add('is-running');
+      else if (available) card.classList.add('is-ok');
+      else if (failed) card.classList.add('is-fail');
+      else card.classList.add('is-warn');
+
+      if (badge) {
+        badge.textContent = installing ? '安装中' : available ? '已就绪' : failed ? '安装失败' : '未安装';
+      }
+
+      brief.textContent = s.detail || s.message || (available ? 'Sharp 已就绪' : '未安装');
+
+      if (manualHint) {
+        const hintText = failed ? (s.manualHint || s.message || '') : '';
+        if (hintText && failed) {
+          manualHint.textContent = hintText;
+          manualHint.style.display = 'block';
+        } else {
+          manualHint.textContent = '';
+          manualHint.style.display = 'none';
+        }
+      }
+
+      if (progressWrap && progressBar && progressHint) {
+        if (installing) {
+          progressWrap.style.display = 'block';
+          const pct = Math.max(8, Math.min(100, Number(s.percent) || 12));
+          progressBar.style.width = pct + '%';
+          progressHint.textContent = s.detail || s.message || '正在安装…';
+        } else if (available && options.showCompleteBar) {
+          progressWrap.style.display = 'block';
+          progressBar.style.width = '100%';
+          progressHint.textContent = '安装完成';
+        } else if (!installing) {
+          progressWrap.style.display = 'none';
+          progressBar.style.width = '0%';
+        }
+      }
+
+      if (installing) {
+        btn.disabled = true;
+        btn.textContent = '安装中…';
+      } else if (available) {
+        btn.disabled = true;
+        btn.textContent = '已安装';
+      } else {
+        btn.disabled = false;
+        btn.textContent = s.packagePresent || failed ? '重新安装' : '安装 Sharp 依赖';
+      }
+
+      if (refreshBtn) refreshBtn.disabled = !!options.lockRefresh;
+    }
+
+    function startSharpDepsPoll() {
+      stopSharpDepsPoll();
+      sharpDepsPollFailStreak = 0;
+      sharpDepsPollTimer = setInterval(async () => {
+        try {
+          const data = await apiCall('/sharp-deps/status', { timeoutMs: 45000 });
+          sharpDepsPollFailStreak = 0;
+          const s = data.data || {};
+          applySharpDepsUi(s);
+          if (!s.installing) {
+            stopSharpDepsPoll();
+            if (s.available) {
+              applySharpDepsUi(s, { showCompleteBar: true });
+              showToast('Sharp 安装成功', 'success');
+              setTimeout(() => applySharpDepsUi(s), 2400);
+            } else if (s.phase === 'failed') {
+              showToast((s.message || 'Sharp 安装失败').split('\n')[0], 'error');
+            }
+          }
+        } catch (e) {
+          sharpDepsPollFailStreak += 1;
+          const brief = document.getElementById('sharpDepsStatusBrief');
+          if (sharpDepsPollFailStreak < 10) {
+            if (brief) {
+              brief.textContent = `安装进行中，服务可能短暂无响应…（重试 ${sharpDepsPollFailStreak}/10）`;
+            }
+            return;
+          }
+          stopSharpDepsPoll();
+          applySharpDepsUi({
+            installing: false,
+            available: false,
+            phase: 'failed',
+            message: '安装状态查询失败: ' + (e?.message || e),
+            detail: '若安装仍在进行，请稍后刷新；也可 SSH 到插件目录查看 sharp-install.log',
+          });
+          showToast('安装状态查询失败: ' + (e?.message || e), 'error');
+        }
+      }, 2000);
+    }
+
+    async function refreshSharpDepsStatus(withToastNotice) {
+      const refreshBtn = document.getElementById('sharpDepsRefreshBtn');
+      try {
+        if (refreshBtn) {
+          refreshBtn.disabled = true;
+        }
+        const data = await apiCall('/sharp-deps/status', { timeoutMs: 20000 });
+        const s = data.data || {};
+        applySharpDepsUi(s, { lockRefresh: true });
+        if (s.installing) startSharpDepsPoll();
+        if (withToastNotice) showToast('Sharp 依赖状态已刷新', 'success');
+      } catch (error) {
+        const brief = document.getElementById('sharpDepsStatusBrief');
+        if (brief) brief.textContent = '状态查询失败: ' + error.message;
+        if (withToastNotice) showToast('刷新失败: ' + error.message, 'error');
+      } finally {
+        if (refreshBtn) refreshBtn.disabled = false;
+      }
+    }
+
+    async function installSharpDependencies() {
+      const btn = document.getElementById('sharpDepsInstallBtn');
+      if (!btn || btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = '启动安装…';
+      applySharpDepsUi({ installing: true, available: false, detail: '正在启动安装…', percent: 8, phase: 'running', message: '' });
+      try {
+        const data = await apiCall('/sharp-deps/install', {
+          method: 'POST',
+          body: JSON.stringify({}),
+          timeoutMs: 30000,
+        });
+        const s = data.data || {};
+        applySharpDepsUi(s);
+        if (s.installing || data.message?.includes('已开始') || data.message?.includes('进行中')) {
+          showToast(data.message || '已开始安装', 'info');
+          startSharpDepsPoll();
+        } else if (s.available) {
+          showToast(data.message || 'Sharp 已就绪', 'success');
+        } else {
+          showToast(data.message || '无法启动安装', 'error');
+        }
+      } catch (error) {
+        applySharpDepsUi({ installing: false, available: false, phase: 'failed', message: error.message, detail: error.message, percent: 0 });
+        showToast('启动安装失败: ' + error.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '安装 Sharp 依赖';
+      }
+    }
+
+    async function saveAdvancedRenderSettings() {
+      try {
+        await apiCall('/config', {
+          method: 'POST',
+          body: JSON.stringify({
+            图片渲染: mkImageRenderEnabled,
+            渲染模式: mkRenderMode,
+          }),
+        });
+        showToast('渲染设置已保存', 'success');
+      } catch (error) {
+        debug('[ERROR] 保存图片渲染设置失败: ' + error.message);
+        showToast('保存图片渲染设置失败: ' + error.message, 'error');
+      }
+    }
 
     function syncSettingsToggleUi() {
       document.querySelectorAll('#page-settings .mk-settings-toggle').forEach((row) => {
@@ -11819,12 +14740,15 @@
         toggle.addEventListener('change', handleDeepEntertainmentToggleChange);
       }
 
-      // 好友：显示“点赞开关”（特定自动点赞名单）
+      // 好友：显示“点赞开关 / 消息记录”（每人单独）
       const autoLikeRow = document.getElementById('autoLikeRow');
       const autoLikeToggle = document.getElementById('autoLikeToggle');
+      const msgRecordRow = document.getElementById('msgRecordRow');
+      const msgRecordToggle = document.getElementById('msgRecordToggle');
       const eventManageRow = document.getElementById('eventManageRow');
       if (type === 'friend') {
         if (autoLikeRow) autoLikeRow.style.display = 'flex';
+        if (msgRecordRow) msgRecordRow.style.display = 'flex';
         if (eventManageRow) eventManageRow.style.display = 'none';
         try {
           const r = await apiCall('/auto-like/status', {
@@ -11838,9 +14762,23 @@
         }
         autoLikeToggle.removeEventListener('change', handleAutoLikeToggleChange);
         autoLikeToggle.addEventListener('change', handleAutoLikeToggleChange);
+        try {
+          const r2 = await apiCall('/msg-record/status', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: id })
+          });
+          msgRecordToggle.checked = !!r2.data?.enabled;
+        } catch (e) {
+          debug('[ERROR] 获取消息记录开关状态失败: ' + e.message);
+          msgRecordToggle.checked = false;
+        }
+        msgRecordToggle.removeEventListener('change', handleMsgRecordToggleChange);
+        msgRecordToggle.addEventListener('change', handleMsgRecordToggleChange);
       } else {
         if (autoLikeRow) autoLikeRow.style.display = 'none';
         autoLikeToggle.removeEventListener('change', handleAutoLikeToggleChange);
+        if (msgRecordRow) msgRecordRow.style.display = 'none';
+        if (msgRecordToggle) msgRecordToggle.removeEventListener('change', handleMsgRecordToggleChange);
         if (eventManageRow) eventManageRow.style.display = 'block';
       }
 
@@ -11867,6 +14805,30 @@
         }
       } catch (e) {
         debug('[ERROR] 保存点赞开关失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'error');
+        this.checked = !isEnabled;
+      }
+    }
+
+    async function handleMsgRecordToggleChange() {
+      if (!window.deepEntertainmentCurrent) return;
+      const { id, type } = window.deepEntertainmentCurrent;
+      if (type !== 'friend') return;
+      const isEnabled = this.checked;
+      try {
+        const r = await apiCall('/msg-record/set', {
+          method: 'POST',
+          body: JSON.stringify({ user_id: id, enabled: isEnabled })
+        });
+        if (r.code === 0) {
+          showToast(`消息记录已${isEnabled ? '开启' : '关闭'}`, 'success');
+          this.checked = !!r.data?.enabled;
+        } else {
+          showToast('保存失败: ' + (r.message || 'unknown'), 'error');
+          this.checked = !isEnabled;
+        }
+      } catch (e) {
+        debug('[ERROR] 保存消息记录开关失败: ' + e.message);
         showToast('保存失败: ' + e.message, 'error');
         this.checked = !isEnabled;
       }
@@ -11924,7 +14886,8 @@
     }
 
     // ================== 群聊事件管理（WebUI）==================
-    const EVENT_KEYS = ["禁言通知","入群审核","邀人统计","自助头衔","伪造聊天","黑白名单","退群拉黑","退群通知","整点报时","禁发红包","入群欢迎","违禁检测","进阶检测","发言统计","群聊续火","视频解析","问答系统","管理模式","入群验证","马甲系统","入群私聊"];
+    const EVENT_KEYS = ["禁言通知","入群审核","邀人统计","自助头衔","伪造聊天","黑白名单","退群拉黑","退群通知","整点报时","禁发红包","入群欢迎","违禁检测","进阶检测","发言统计","群聊续火","视频解析","问答系统","管理模式","入群验证","马甲系统","入群私聊","消息记录"];
+    let EVENT_KEYS_RUNTIME = EVENT_KEYS.slice();
     window.eventManageCurrent = null;
     let eventManageLongPressTimer = null;
     let eventManageLongPressFired = false;
@@ -11964,9 +14927,10 @@
     function updateEventManageStat(values) {
       const stat = document.getElementById('eventManageStat');
       if (!stat) return;
-      const total = EVENT_KEYS.length;
+      const keys = (Array.isArray(EVENT_KEYS_RUNTIME) && EVENT_KEYS_RUNTIME.length) ? EVENT_KEYS_RUNTIME : EVENT_KEYS;
+      const total = keys.length;
       let enabled = 0;
-      for (const k of EVENT_KEYS) {
+      for (const k of keys) {
         const v = (values && typeof values === 'object') ? values[k] : '关闭';
         if (v === '开启') enabled += 1;
       }
@@ -12008,6 +14972,9 @@
       try {
         const r = await apiCall(`/events/group?group_id=${encodeURIComponent(groupId)}`);
         const values = r?.data?.values || {};
+        const keys = Array.isArray(r?.data?.keys) ? r.data.keys : null;
+        if (keys && keys.length) EVENT_KEYS_RUNTIME = keys.map((k) => String(k));
+        else EVENT_KEYS_RUNTIME = EVENT_KEYS.slice();
         renderEventManageList(values);
       } catch (e) {
         renderEventManageError('加载失败: ' + (e?.message || String(e)));
@@ -12024,7 +14991,8 @@
       const list = document.getElementById('eventManageList');
       if (!list) return;
       const rows = [];
-      for (const k of EVENT_KEYS) {
+      const keys = (Array.isArray(EVENT_KEYS_RUNTIME) && EVENT_KEYS_RUNTIME.length) ? EVENT_KEYS_RUNTIME : EVENT_KEYS;
+      for (const k of keys) {
         const v = (values && typeof values === 'object') ? values[k] : '关闭';
         const isOn = v === '开启';
         const checked = isOn ? 'checked' : '';
@@ -12188,6 +15156,8 @@
         debug('[WARN] 读取神秘数字失败: ' + e.message);
       }
       
+      syncSecretDeveloperModeUi();
+
       const panel = document.getElementById('secretNumberPanel');
       if (panel) {
         panel.style.display = 'block';
@@ -12307,6 +15277,389 @@
     });
     initPage();
   </script>
-</body>
+
+  <script>
+  (function() {
+    function isDevModeSplash() {
+      try { return localStorage.getItem('mkbot_developer_mode') === '1'; } catch (e) { return false; }
+    }
+
+    // 冷却时间：15分钟（毫秒）；开发者模式下为 0
+    var COOLDOWN_TIME = isDevModeSplash() ? 0 : 15 * 60 * 1000;
+    var STORAGE_KEY = 'mkbot_splash_last_show';
+
+    // 检查是否需要显示开屏
+    var lastShow = parseInt(localStorage.getItem(STORAGE_KEY) || '0');
+    var now = Date.now();
+
+    if (now - lastShow < COOLDOWN_TIME) {
+      // 冷却中，不显示开屏
+      var splash = document.getElementById('splashScreen');
+      if (splash) splash.style.display = 'none';
+      return;
+    }
+
+    // 记录显示时间
+    localStorage.setItem(STORAGE_KEY, now.toString());
+
+    var SPLASH_FALLBACK_AVATAR = 'https://q4.qlogo.cn/g?b=qq&nk=864264375&s=640';
+
+    function renderSplashSubtitle(text) {
+      var subtitleEl = document.getElementById('splashSubtitle');
+      if (!subtitleEl) return;
+      subtitleEl.innerHTML = '';
+      String(text || '').split('').forEach(function(char, index) {
+        var span = document.createElement('span');
+        span.className = 'splash-subtitle-char';
+        span.textContent = char;
+        span.style.animationDelay = (1.3 + index * 0.08) + 's';
+        subtitleEl.appendChild(span);
+      });
+    }
+
+    function applySplashBotAvatar(info) {
+      var img = document.getElementById('splashLogoImg');
+      if (!img) return;
+      var url = (info && info.avatarUrl) || SPLASH_FALLBACK_AVATAR;
+      img.onload = function() {
+        img.classList.add('is-loaded');
+        if (info && info.connected) img.classList.add('is-bot');
+      };
+      img.onerror = function() {
+        if (img.src !== SPLASH_FALLBACK_AVATAR) {
+          img.src = SPLASH_FALLBACK_AVATAR;
+          return;
+        }
+        img.classList.add('is-loaded');
+      };
+      if (img.complete && img.naturalWidth > 0) {
+        img.classList.add('is-loaded');
+        if (info && info.connected) img.classList.add('is-bot');
+      }
+      img.src = url;
+      if (info && info.connected && info.nickname) {
+        renderSplashSubtitle('已连接 · ' + info.nickname);
+      }
+    }
+
+    function startSplashAvatarResolve() {
+      var resolver = window.mkbotResolveSplashBotAvatar;
+      if (typeof resolver !== 'function') {
+        setTimeout(startSplashAvatarResolve, 40);
+        return;
+      }
+      resolver().then(applySplashBotAvatar).catch(function() {
+        applySplashBotAvatar(null);
+      });
+    }
+    startSplashAvatarResolve();
+
+    // 逐字显示标题
+    var titleText = 'MKBOT';
+    var titleEl = document.getElementById('splashTitle');
+
+    titleText.split('').forEach(function(char, index) {
+      var span = document.createElement('span');
+      span.className = 'splash-title-char';
+      span.textContent = char;
+      span.style.animationDelay = (0.8 + index * 0.12) + 's';
+      titleEl.appendChild(span);
+    });
+
+    renderSplashSubtitle('欢迎使用');
+
+    function initSplashBgDecor() {
+      var starsEl = document.getElementById('splashBgStars');
+      var bubblesEl = document.getElementById('splashBubbles');
+      if (starsEl) {
+        for (var si = 0; si < 52; si++) {
+          var star = document.createElement('span');
+          star.className = 'splash-star' + (Math.random() > 0.72 ? ' is-bright' : '');
+          star.style.left = (Math.random() * 100) + '%';
+          star.style.top = (Math.random() * 100) + '%';
+          star.style.setProperty('--d', (2 + Math.random() * 4.5) + 's');
+          star.style.setProperty('--delay', (Math.random() * 6) + 's');
+          starsEl.appendChild(star);
+        }
+      }
+      if (bubblesEl) {
+        var bubbleTints = [
+          'rgba(255, 107, 157, 0.62)',
+          'rgba(196, 77, 255, 0.58)',
+          'rgba(107, 157, 255, 0.58)',
+          'rgba(107, 255, 181, 0.5)',
+          'rgba(255, 200, 120, 0.52)',
+        ];
+        for (var bi = 0; bi < 18; bi++) {
+          var bubble = document.createElement('span');
+          bubble.className = 'splash-bubble';
+          var bSize = 5 + Math.random() * 11;
+          var bTint = bubbleTints[Math.floor(Math.random() * bubbleTints.length)];
+          bubble.style.width = bSize + 'px';
+          bubble.style.height = bSize + 'px';
+          bubble.style.left = (4 + Math.random() * 92) + '%';
+          bubble.style.setProperty('--tint', bTint);
+          bubble.style.setProperty('--dur', (7 + Math.random() * 10) + 's');
+          bubble.style.setProperty('--delay', (Math.random() * 8) + 's');
+          bubble.style.setProperty('--drift', ((Math.random() - 0.5) * 60) + 'px');
+          bubble.style.setProperty('--peak', (0.55 + Math.random() * 0.4));
+          bubble.style.setProperty('--glow', '0 0 ' + Math.max(6, Math.round(bSize * 1.2)) + 'px ' + bTint);
+          bubblesEl.appendChild(bubble);
+        }
+      }
+    }
+    initSplashBgDecor();
+
+    // 粒子系统
+    var canvas = document.getElementById('splashParticleCanvas');
+    var ctx = canvas.getContext('2d');
+    var particles = [];
+    var shootingStars = [];
+    var animationId;
+    var isLoadingComplete = false;
+    var isTransitioning = false;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', function() {
+      resizeCanvas();
+      initParticles();
+    });
+
+    var particleColors = [
+      { h: 340, s: 100, l: 75 },
+      { h: 270, s: 100, l: 75 },
+      { h: 210, s: 100, l: 75 },
+      { h: 150, s: 80, l: 75 },
+      { h: 30, s: 100, l: 75 },
+    ];
+
+    function Particle() { this.reset(); }
+    Particle.prototype.reset = function() {
+      this.x = Math.random() * canvas.width;
+      this.y = Math.random() * canvas.height;
+      this.size = Math.random() * 2.5 + 0.8;
+      this.speedX = (Math.random() - 0.5) * 0.4;
+      this.speedY = (Math.random() - 0.5) * 0.4;
+      this.opacity = Math.random() * 0.6 + 0.2;
+      this.color = particleColors[Math.floor(Math.random() * particleColors.length)];
+      this.twinkleSpeed = Math.random() * 0.02 + 0.005;
+      this.twinklePhase = Math.random() * Math.PI * 2;
+    };
+    Particle.prototype.update = function(time) {
+      this.x += this.speedX;
+      this.y += this.speedY;
+      if (this.x < -10 || this.x > canvas.width + 10) this.speedX *= -1;
+      if (this.y < -10 || this.y > canvas.height + 10) this.speedY *= -1;
+      this.currentOpacity = this.opacity + Math.sin(time * this.twinkleSpeed + this.twinklePhase) * 0.2;
+      this.currentOpacity = Math.max(0.1, Math.min(1, this.currentOpacity));
+    };
+    Particle.prototype.draw = function() {
+      var h = this.color.h, s = this.color.s, l = this.color.l;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = 'hsla(' + h + ', ' + s + '%, ' + l + '%, ' + this.currentOpacity + ')';
+      ctx.fill();
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = 'hsla(' + h + ', ' + s + '%, ' + l + '%, 0.6)';
+    };
+
+    function initParticles() {
+      particles = [];
+      var count = Math.floor((canvas.width * canvas.height) / 12000);
+      for (var i = 0; i < count; i++) particles.push(new Particle());
+    }
+
+    function ShootingStar() {
+      this.active = false;
+      this.reset();
+    }
+    ShootingStar.prototype.reset = function() {
+      this.active = false;
+      this.x = Math.random() * canvas.width;
+      this.y = Math.random() * canvas.height * 0.45;
+      this.len = 70 + Math.random() * 110;
+      this.speed = 9 + Math.random() * 8;
+      this.angle = Math.PI / 4 + (Math.random() - 0.5) * 0.5;
+      this.opacity = 0;
+      this.life = 0;
+      this.maxLife = 28 + Math.random() * 18;
+      this.hue = 300 + Math.random() * 80;
+    };
+    ShootingStar.prototype.spawn = function() {
+      this.reset();
+      this.active = true;
+    };
+    ShootingStar.prototype.update = function() {
+      if (!this.active) return;
+      this.life++;
+      this.x += Math.cos(this.angle) * this.speed;
+      this.y += Math.sin(this.angle) * this.speed;
+      if (this.life < 7) this.opacity = this.life / 7;
+      else if (this.life > this.maxLife - 8) this.opacity = Math.max(0, (this.maxLife - this.life) / 8);
+      else this.opacity = 1;
+      if (this.life >= this.maxLife) this.active = false;
+    };
+    ShootingStar.prototype.draw = function() {
+      if (!this.active || this.opacity <= 0) return;
+      var tailX = this.x - Math.cos(this.angle) * this.len;
+      var tailY = this.y - Math.sin(this.angle) * this.len;
+      var grad = ctx.createLinearGradient(tailX, tailY, this.x, this.y);
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(0.45, 'hsla(' + this.hue + ',100%,88%,' + (this.opacity * 0.65) + ')');
+      grad.addColorStop(1, 'hsla(340,100%,96%,' + this.opacity + ')');
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(this.x, this.y);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'hsla(' + this.hue + ',100%,85%,' + (this.opacity * 0.8) + ')';
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
+
+    function spawnShootingStar() {
+      var activeCount = 0;
+      var idle = null;
+      for (var si = 0; si < shootingStars.length; si++) {
+        if (shootingStars[si].active) activeCount++;
+        else if (!idle) idle = shootingStars[si];
+      }
+      if (activeCount >= 8) return;
+      if (!idle) {
+        idle = new ShootingStar();
+        shootingStars.push(idle);
+      }
+      idle.spawn();
+    }
+
+    function spawnShootingStarBurst() {
+      var burst = 1 + (Math.random() < 0.45 ? 1 : 0) + (Math.random() < 0.18 ? 1 : 0);
+      for (var bi = 0; bi < burst; bi++) spawnShootingStar();
+    }
+
+    function drawConnections() {
+      for (var i = 0; i < particles.length; i++) {
+        for (var j = i + 1; j < particles.length; j++) {
+          var dx = particles[i].x - particles[j].x;
+          var dy = particles[i].y - particles[j].y;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 100) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            var opacity = (1 - dist / 100) * 0.12;
+            var grad = ctx.createLinearGradient(
+              particles[i].x, particles[i].y,
+              particles[j].x, particles[j].y
+            );
+            grad.addColorStop(0, 'hsla(' + particles[i].color.h + ', 100%, 75%, ' + opacity + ')');
+            grad.addColorStop(1, 'hsla(' + particles[j].color.h + ', 100%, 75%, ' + opacity + ')');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    var startTime = Date.now();
+    var nextShootingStarAt = Date.now() + 180 + Math.random() * 220;
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.shadowBlur = 0;
+      var elapsed = Date.now() - startTime;
+      for (var i = 0; i < particles.length; i++) {
+        particles[i].update(elapsed);
+        particles[i].draw();
+      }
+      drawConnections();
+      if (Date.now() >= nextShootingStarAt) {
+        spawnShootingStarBurst();
+        nextShootingStarAt = Date.now() + 280 + Math.random() * 420;
+      }
+      for (var sj = 0; sj < shootingStars.length; sj++) {
+        shootingStars[sj].update();
+        shootingStars[sj].draw();
+      }
+      animationId = requestAnimationFrame(animate);
+    }
+
+    initParticles();
+    animate();
+    setTimeout(spawnShootingStarBurst, 120);
+    setTimeout(spawnShootingStarBurst, 360);
+    setTimeout(spawnShootingStarBurst, 620);
+
+    // 跳转到主内容
+    function goToMain() {
+      if (isTransitioning) return;
+      isTransitioning = true;
+      var splash = document.getElementById('splashScreen');
+      splash.classList.add('splash-hidden');
+      setTimeout(function() {
+        cancelAnimationFrame(animationId);
+      }, 1000);
+    }
+
+    // 点击事件
+    function splashClickHandler(e) {
+      if (isTransitioning) return;
+      if (isLoadingComplete) {
+        goToMain();
+        document.removeEventListener('click', splashClickHandler);
+      } else {
+        isLoadingComplete = true;
+        goToMain();
+        document.removeEventListener('click', splashClickHandler);
+      }
+    }
+    document.addEventListener('click', splashClickHandler);
+
+    // 模拟加载完成
+    setTimeout(function() {
+      if (isTransitioning) return;
+      isLoadingComplete = true;
+      var loadingText = document.getElementById('splashLoadingText');
+      if (loadingText) {
+        loadingText.textContent = '加载完成，点击任意位置继续';
+        loadingText.style.animation = 'splashPulseGlow 1.5s ease-in-out infinite';
+      }
+      var loadingBar = document.querySelector('.splash-loading-bar');
+      if (loadingBar) loadingBar.style.width = '100%';
+    }, 4200);
+
+    // 鼠标交互
+    var mouseX = -1000, mouseY = -1000;
+    canvas.addEventListener('mousemove', function(e) { mouseX = e.clientX; mouseY = e.clientY; });
+    canvas.addEventListener('mouseleave', function() { mouseX = -1000; mouseY = -1000; });
+
+    var origUpdate = Particle.prototype.update;
+    Particle.prototype.update = function(time) {
+      origUpdate.call(this, time);
+      var dx = mouseX - this.x;
+      var dy = mouseY - this.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 180) {
+        var force = (180 - dist) / 180 * 0.015;
+        this.speedX += dx / dist * force;
+        this.speedY += dy / dist * force;
+        var maxSpeed = 1.2;
+        var speed = Math.sqrt(this.speedX * this.speedX + this.speedY * this.speedY);
+        if (speed > maxSpeed) {
+          this.speedX = (this.speedX / speed) * maxSpeed;
+          this.speedY = (this.speedY / speed) * maxSpeed;
+        }
+      }
+    };
+  })();
+  </script>
+
+  </body>
 </html>
 

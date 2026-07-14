@@ -3,6 +3,12 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import {
+  mkBuildNestedForwardOb11Node,
+  mkConvertForwardContentToSnowLuma,
+  mkIsSnowLumaBackend,
+  mkNormalizeOb11NodeTree,
+} from './lib/snowluma-compat';
 
 // ================== 当前上下文（plugin_onmessage / plugin_onevent 入口注入） ==================
 let 当前上下文 = null;
@@ -203,6 +209,160 @@ function 合并视文节点(name, qq, text, video, extra = {}) {
   return 合并节点(name, qq, content, extra);
 }
 
+// ================== 合并转发 · 卡片预览（source / summary / prompt / news） ==================
+/** 手动指定合并转发卡片四要素；news 可选，为 string[] 或 {text}[] */
+function 合并预览(source, summary, prompt, news) {
+  const out = {};
+  const s = String(source ?? "").trim();
+  if (s) out.source = s;
+  if (summary != null && String(summary).trim()) out.summary = String(summary).trim();
+  out.prompt = String(prompt ?? "[聊天记录]").trim() || "[聊天记录]";
+  if (Array.isArray(news) && news.length) {
+    out.news = news
+      .map((item) => {
+        if (typeof item === "string") return { text: item };
+        if (item && typeof item === "object" && item.text != null) return { text: String(item.text) };
+        return { text: String(item ?? "") };
+      })
+      .filter((x) => x.text.trim());
+  }
+  return out;
+}
+
+function stripNodeDisplayName(name) {
+  return (
+    String(name ?? "")
+      .replace(/^\[[^\]]*\]\s*/, "")
+      .replace(/^[\u{1F300}-\u{1FAFF}\u2600-\u27BF]\s*/u, "")
+      .trim() || "MKbot"
+  );
+}
+
+function extractLogicalNodePreviewText(node) {
+  if (Array.isArray(node?._mkNestedChildren) && node._mkNestedChildren.length) {
+    const sub = extractLogicalNodePreviewText(node._mkNestedChildren[0]);
+    return sub !== "[消息]" ? sub : `[${node._mkNestedChildren.length}条子模块]`;
+  }
+  const content = node?.content;
+  if (!Array.isArray(content)) return "[消息]";
+  for (const seg of content) {
+    if (!seg || typeof seg !== "object") continue;
+    const type = String(seg.type ?? "").toLowerCase();
+    if (type === "node") {
+      const sub = extractLogicalNodePreviewText({
+        name: seg.data?.name,
+        content: seg.data?.content,
+      });
+      if (sub !== "[消息]") return sub;
+      continue;
+    }
+    if (type === "text" && seg.data?.text != null) {
+      const t = String(seg.data.text).replace(/\s+/g, " ").trim();
+      if (t) return t.length > 36 ? `${t.slice(0, 36)}…` : t;
+    }
+    if (type === "image") return "[图片]";
+    if (type === "video") return "[视频]";
+    if (type === "forward") return "[嵌套聊天记录]";
+    if (type === "json" || type === "xml") return "[卡片消息]";
+  }
+  return "[消息]";
+}
+
+function pickMergeForwardTitle(nodes) {
+  const nestedRoots = (nodes || []).filter(
+    (n) => Array.isArray(n?._mkNestedChildren) && n._mkNestedChildren.length > 0,
+  );
+  if (nestedRoots.length >= 5) {
+    const names = nestedRoots.map((n) => String(n.name ?? "")).join(" ");
+    if (/群管|审核|头衔|骨灰|黑名单|违禁|发言|欢迎|马甲|基础群管/.test(names)) {
+      return "MKbot 群管功能目录";
+    }
+    if (/授权|事件|群管系统|漂流|发卡/.test(names)) {
+      return "MKbot 功能介绍";
+    }
+  }
+  for (const n of nodes || []) {
+    const name = String(n?.name ?? "").trim();
+    const bracket = name.match(/^\[([^\]]+)\]/);
+    if (bracket?.[1]) return bracket[1].trim();
+    if (Array.isArray(n?._mkNestedChildren)) {
+      const nestedName = stripNodeDisplayName(n.name);
+      if (nestedName && nestedName !== "MKbot") return nestedName;
+    }
+  }
+  const first = String(nodes?.[0]?.name ?? "").trim();
+  if (first === "介绍" || first === "目录") return "MKbot 功能介绍";
+  if (first) return stripNodeDisplayName(first);
+  return "MKbot";
+}
+
+function inferMergeForwardSummary(title, count, isGroup) {
+  const t = String(title ?? "");
+  if (/MK介绍|功能介绍|功能手册|功能目录/.test(t)) return "点击查看 MKbot 各模块说明与演示";
+  if (/群管.*目录|群管功能/.test(t)) return "群管八模块指令与子菜单一览";
+  if (/排行榜|统计|发言/.test(t)) return `共 ${count} 条，完整排名见转发`;
+  if (/列表|群员|骨灰|黑名单|违禁词|禁言|全员|本群全部/.test(t)) return `共 ${count} 条记录，点击查看详情`;
+  if (/结果|操作|执行|提醒|总结|改头衔/.test(t)) return `操作结果（${count} 条）`;
+  if (/发卡|商品|商店|卡密/.test(t)) return "商品库存与卡密明细";
+  if (/伪造|聊天/.test(t)) return "自定义合并聊天记录预览";
+  if (/音乐|歌单/.test(t)) return "音乐点歌与歌单说明";
+  if (/空间|动态/.test(t)) return "QQ空间动态合集";
+  if (/下载|插件/.test(t)) return "插件下载与安装说明";
+  if (/续火/.test(t)) return "群聊续火管理说明";
+  if (/取数据|数据导出|扩展-/.test(t)) return "引用消息结构化数据导出";
+  if (/EPIC|游戏|MC|饰品|服务器/.test(t)) return `共 ${count} 条，点击查看详情`;
+  if (/文件|文件夹/.test(t)) return `群文件列表（${count} 条）`;
+  if (/授权|卡密|群老婆|漂流/.test(t)) return "玩法与授权相关说明";
+  if (/入群|记录/.test(t)) return "入群私聊收录内容回放";
+  if (/全局|开关|变态/.test(t)) return `全局配置项（${count} 条）`;
+  if (/公告|菜单/.test(t)) return `菜单说明（${count} 条）`;
+  if (isGroup) return `群聊共 ${count} 条消息`;
+  return `查看 ${count} 条转发消息`;
+}
+
+/** 根据节点与场景自动生成卡片预览；preview 传入时覆盖对应字段 */
+function 构建合并转发预览(nodes, event, preview) {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return preview && typeof preview === "object" ? preview : 合并预览("MKbot", "聊天记录", "[聊天记录]", []);
+  }
+  const isGroup = event?.message_type === "group";
+  const title = pickMergeForwardTitle(nodes);
+  const count = nodes.length;
+  let source = title;
+  if (/MKbot/.test(title)) {
+    source = title;
+  } else if (isGroup) {
+    source = `${title} · 群聊`;
+  }
+
+  const auto = 合并预览(
+    source,
+    inferMergeForwardSummary(title, count, isGroup),
+    "[聊天记录]",
+    nodes.slice(0, 4).map((n) => {
+      const label = stripNodeDisplayName(n?.name || "用户");
+      return `${label}: ${extractLogicalNodePreviewText(n)}`;
+    }),
+  );
+
+  if (!preview || typeof preview !== "object") return auto;
+  return {
+    source: preview.source ?? auto.source,
+    summary: preview.summary ?? auto.summary,
+    prompt: preview.prompt ?? auto.prompt,
+    news: preview.news ?? auto.news,
+  };
+}
+
+function attachForwardPreviewToParams(params, preview) {
+  if (!preview || typeof preview !== "object") return params;
+  if (preview.source) params.source = preview.source;
+  if (preview.summary) params.summary = preview.summary;
+  if (preview.prompt) params.prompt = preview.prompt;
+  if (Array.isArray(preview.news) && preview.news.length) params.news = preview.news;
+  return params;
+}
+
 /** 仅图片（可多张） */
 function 合并图片节点(name, qq, images, extra = {}) {
   const content = [];
@@ -228,32 +388,48 @@ function 构建Ob11节点(node, defaultUin) {
     };
   }
 
-  const content =
+  const uin = String(node?.qq ?? defaultUin);
+  const name = node?.name || "用户";
+
+  if (Array.isArray(node?._mkNestedChildren)) {
+    const childOb11 = (node._mkNestedChildren || []).map((c) => 构建Ob11节点(c, uin));
+    const prefix = Array.isArray(node._mkNestedPrefix) ? node._mkNestedPrefix : [];
+    return mkBuildNestedForwardOb11Node(name, uin, childOb11, prefix, {
+      time: node?.time,
+    });
+  }
+
+  let content =
     Array.isArray(node?.content) && node.content.length > 0
       ? node.content
       : [段_文本("")];
 
-  const data = {
-    name: node?.name || "用户",
-    uin: String(node?.qq ?? defaultUin),
-    content,
-  };
+  if (mkIsSnowLumaBackend() && Array.isArray(content)) {
+    content = mkConvertForwardContentToSnowLuma(content, uin, 构建Ob11节点);
+  }
+
+  const data = { name, uin, content };
   if (node?.time != null) data.time = node.time;
-  return { type: "node", data };
+  const built = { type: "node", data };
+  if (mkIsSnowLumaBackend()) {
+    return mkNormalizeOb11NodeTree(built, defaultUin, 构建Ob11节点);
+  }
+  return built;
 }
 
 /**
  * 嵌套合并转发：prefixContent 在前（如标题文本），其后为子节点列表。
  * children 为 { name, qq, content }[]，可递归嵌套。
+ * NapCat：content 内 forward id:"0" + 子 node；SnowLuma：content 为纯 node 数组（见 snowluma-compat）。
  */
 function 嵌套合并节点(name, qq, children, extra = {}, prefixContent = []) {
-  const childNodes = (children || []).map((c) => 构建Ob11节点(c, qq ?? extra.qq));
-  const content = [
-    ...(Array.isArray(prefixContent) ? prefixContent : []),
-    { type: "forward", data: { id: "0" } },
-    ...childNodes,
-  ];
-  return 合并节点(name, qq, content, extra);
+  const prefix = Array.isArray(prefixContent) ? prefixContent : [];
+  return 合并节点(name, qq, null, {
+    ...extra,
+    qq,
+    _mkNestedChildren: children || [],
+    _mkNestedPrefix: prefix,
+  });
 }
 
 // ================== 单发消息（text / image / face 可组合，纯 OB11 JSON 段） ==================
@@ -337,7 +513,8 @@ async function 发视频(event, 封面, 视频, 名称) {
 
 // ================== 合并转发 ==================
 // nodes: [{ name, qq, content: [...] }] 或 [{ id, name, qq }]
-async function 发合并消息(event, nodes) {
+// preview: 可选，合并预览() 或 构建合并转发预览 的返回值；省略则按节点内容自动生成
+async function 发合并消息(event, nodes, preview, opts = {}) {
   const ctx = 当前上下文;
   if (!ctx?.actions || !Array.isArray(nodes) || nodes.length === 0) return false;
 
@@ -352,7 +529,9 @@ async function 发合并消息(event, nodes) {
       ? { group_id: String(event.group_id) }
       : { user_id: String(event.user_id) }),
   };
+  attachForwardPreviewToParams(params, 构建合并转发预览(nodes, event, preview));
   const action = isGroup ? "send_group_forward_msg" : "send_private_forward_msg";
+  const silent = !!opts.silent;
 
   try {
     await ctx.actions.call(action, params, ctx.adapterName, ctx.pluginManager.config);
@@ -362,7 +541,7 @@ async function 发合并消息(event, nodes) {
       await ctx.actions.call("send_forward_msg", params, ctx.adapterName, ctx.pluginManager.config);
       return true;
     } catch (error2) {
-      if (ctx.logger?.error) {
+      if (!silent && ctx.logger?.error) {
         ctx.logger.error("发送合并消息失败:", error2 ?? error);
       }
       return false;
@@ -393,4 +572,7 @@ export {
   合并图文节点,
   合并视文节点,
   合并图片节点,
+  合并预览,
+  构建合并转发预览,
+  attachForwardPreviewToParams,
 };

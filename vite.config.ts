@@ -113,7 +113,7 @@ export default defineConfig({
       fileName: () => 'index.mjs',
     },
     rollupOptions: {
-      external: [...nodeModules],
+      external: [...nodeModules, 'sharp'],
       output: {
         inlineDynamicImports: true,
       },

@@ -1,11 +1,12 @@
 // @ts-nocheck
-// 体量极大，完整 strict 检查需分模块逐步抽取；边界类型见 ./types.ts，卡密逻辑已迁至 ./auth/card-license.ts，群老婆已迁至 ./auth/group-wife.ts，API接口功能已迁至 ./auth/api-interface.ts，漂流瓶已迁至 ./auth/drift-bottle.ts，入群私聊收录已迁至 ./auth/join-group-pm.ts
+// 体量极大，完整 strict 检查需分模块逐步抽取；边界类型见 ./types.ts，卡密逻辑已迁至 ./auth/card-license.ts，群老婆已迁至 ./auth/group-wife.ts，API接口功能已迁至 ./auth/api-interface.ts，漂流瓶已迁至 ./auth/drift-bottle.ts，入群私聊收录已迁至 ./auth/join-group-pm.ts，发卡系统已迁至 ./auth/card-shop.ts，发卡 WebUI API 已迁至 ./auth/card-shop-web.ts
 import fs from 'fs';
 import { createWriteStream } from 'fs';
 import path from 'path';
 import https from 'https';
 import os from 'os';
 import { execSync } from 'child_process';
+import { randomBytes } from 'crypto';
 import { fileURLToPath, pathToFileURL } from 'url';
 import {
   checkAuthStatusImpl,
@@ -16,6 +17,12 @@ import {
 import { handleGroupWifeCommands } from './auth/group-wife';
 import { handleApiInterfaceCommands } from './auth/api-interface';
 import { handleDriftBottleCommands } from './auth/drift-bottle';
+import { handleCardShopCommands } from './auth/card-shop';
+import { registerCardShopWebGetRoutes, registerCardShopWebPostRoutes } from './auth/card-shop-web';
+import { registerQqMailWebGetRoutes, registerQqMailWebPostRoutes } from './auth/qq-mail-web';
+import { registerOfflineNotifyWebGetRoutes, registerOfflineNotifyWebPostRoutes } from './auth/offline-notify-web';
+import { handleOfflineNotifyBotOffline } from './auth/offline-notify';
+import { sendMkQqMail, setMkQqMailInternalSecret } from './lib/api/qq-mail-send';
 import {
   buildFakeChatHelpText,
   extractFakeChatJsonPayload,
@@ -49,9 +56,43 @@ import {
   getKeys,
   clear,
 } from './data-fs';
-import { 发视频, 发语音, 发卡片, 发音乐卡片, 发合并消息, 发消息, bindBotCtx, isSendTimeoutError, 段_文本, 段_图片, 段_视频, 段_语音, 段_Json, 段_表情, 段_引用, 段_艾特, 合并节点, 嵌套合并节点, 合并引用, 合并图文节点, 合并视文节点, 合并图片节点 } from './BOT';
-import { callLocalVideoApi } from './lib/api/loader';
+import { 发视频, 发语音, 发卡片, 发音乐卡片, 发合并消息, 发消息, bindBotCtx, isSendTimeoutError, 段_文本, 段_图片, 段_视频, 段_语音, 段_Json, 段_表情, 段_引用, 段_艾特, 合并节点, 嵌套合并节点, 合并引用, 合并图文节点, 合并视文节点, 合并图片节点, 合并预览 } from './BOT';
+import { callLocalVideoApi, callLocalImghostApi } from './lib/api/loader';
+import { isImageRenderEnabled, getRenderMode } from './lib/image-render';
+import { renderMenuWithSharp, resetSharpModuleCache } from './lib/sharp-render';
+import { renderSignInWithSharp } from './lib/signin-sharp-render';
+import { renderWalletWithSharp } from './lib/wallet-sharp-render';
+import { renderStatusWithSharp } from './lib/status-sharp-render';
+import { renderJoinIdentityWithSharp } from './lib/join-identity-sharp-render';
+import { renderFishBasketWithSharp, FISH_BASKET_MAX_ROWS } from './lib/fish-basket-sharp-render';
+import { buildMenuIconSpriteSvg } from './lib/menu-icons';
+import { configureSharpRuntimePaths } from './lib/sharp-loader';
+import { getSharpDependencyStatus, triggerSharpDependencyInstall, cancelSharpDependencyInstall } from './lib/plugin-deps';
+import { buildMajiaCard, sanitizeMajiaNickname } from './lib/majia-sanitize';
 import { qzonePublishDynamic, qzoneGetFeeds, qzoneLike, qzoneComment, qzoneReplyComment } from './lib/qzone';
+import {
+  captureGuanjiaTokenFromMessage,
+  guanjiaTestSend,
+  GUANJIA_BOT_UIN,
+  ensureGuanjiaToken,
+} from './lib/qun-guanjia';
+import { cleanupGuanjiaOnPluginStop } from './lib/qun-guanjia';
+import {
+  decodeObHtmlEntities,
+  resolveEventPlainMessage,
+  eventMessagePlainText,
+  collectForbiddenWordMatchText,
+  eventForbiddenWordMatchText,
+  eventUserTextFromSegments,
+  forbiddenWordsMatchText,
+  isQqRedPacketLikeEvent,
+  normalizeObActionParams,
+  mkExtractBotApiPayload,
+  mkSetProtocolBackendSetting,
+  mkSyncProtocolBackendFromFramework,
+  mkEnsureProtocolBackend,
+  mkIsSnowLumaBackend,
+} from './lib/snowluma-compat';
 export type {
   QzonePublishOptions,
   QzonePublishResult,
@@ -93,6 +134,16 @@ function mkIsKakakeLikeFramework(ctx) {
   return !!(fw && (fw.frameworkId === 'kakake' || fw.frameworkId === 'mk-jsbot'));
 }
 
+async function bindBotCtxWithProtocol(ctx) {
+  bindBotCtx(ctx);
+  mkSyncProtocolBackendFromFramework(ctx);
+  if (ctx?.actions?.call) {
+    await mkEnsureProtocolBackend(ctx, (action, params) =>
+      ctx.actions.call(action, params, ctx.adapterName, ctx.pluginManager.config),
+    );
+  }
+}
+
 function mkReadPackageJsonName(ctx) {
   try {
     const pkgPath = path.join(ctx.pluginPath, 'package.json');
@@ -123,7 +174,31 @@ function mkResolvePluginRuntimeDataDir(ctx) {
   return getDataPath();
 }
 
+function mkSharpDepsPaths(ctx) {
+  return {
+    dataDir: mkResolvePluginRuntimeDataDir(ctx),
+    pluginDir: String(ctx?.pluginPath || PLUGIN_DIR || '').trim(),
+  };
+}
+
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+/** QQ 邮箱发信依赖（含内部密钥，不对外导出） */
+let mkMailSendDeps = null;
+
+/** 离线通知依赖（与邮箱发信共用 readA/writeA） */
+let offlineNotifyDeps = null;
+
+/** MK 插件内部发信：发邮箱("QQ邮箱", { 标题, 名字, 内容, 收件人 }) */
+async function 发邮箱(渠道, ...args) {
+  if (!mkMailSendDeps) {
+    return { ok: false, message: '邮箱服务尚未初始化' };
+  }
+  return sendMkQqMail(mkMailSendDeps, 渠道, args);
+}
+
+/** 聚合图床：58同城 → fuliba → IMGDD，统一返回 { code, msg, data:{ url, source } } */
+const 上传图床 = async (input) => callLocalImghostApi(PLUGIN_DIR, input);
 
 /** 与远程「版本类」公告条数对齐：文件名或 version 以「数字.数字」开头 */
 function isMkbotAnnouncementComparableStem(stem) {
@@ -328,85 +403,6 @@ async function fetchMkbotRemoteAnnouncementData(key) {
       finish(new Error("获取公告超时"));
     });
   });
-}
-
-function load发卡商品代号表() {
-  const 相对 = `筱筱吖/扩展功能/发卡系统/商品代号.json`;
-  const content = readA(相对);
-  if (!content) return {};
-  try {
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
-}
-
-function load发卡商品价格表() {
-  const 相对 = `筱筱吖/扩展功能/发卡系统/商品价格.json`;
-  const content = readA(相对);
-  if (!content) return {};
-  try {
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
-}
-
-function load发卡商品上下架表() {
-  const 相对 = `筱筱吖/扩展功能/发卡系统/商品上下架.json`;
-  const content = readA(相对);
-  if (!content) return {};
-  try {
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
-}
-
-function save发卡商品上下架表(表) {
-  writeA(`筱筱吖/扩展功能/发卡系统/商品上下架.json`, JSON.stringify(表, null, 2));
-}
-
-/** 未记录或 true 视为上架；false 为下架 */
-function 发卡商品是否上架(上下架表, 商品名) {
-  if (!Object.prototype.hasOwnProperty.call(上下架表, 商品名)) return true;
-  return 上下架表[商品名] !== false;
-}
-
-function 发卡库存文件路径(商品代号) {
-  return path.join(getDataPath(), `筱筱吖/扩展功能/发卡系统/`, "data", `${商品代号}.txt`);
-}
-
-function 读取发卡库存非空行(商品代号) {
-  const fp = 发卡库存文件路径(商品代号);
-  if (!fs.existsSync(fp)) return [];
-  return fs.readFileSync(fp, "utf-8").split(/\r?\n/).filter((line) => line.trim() !== "");
-}
-
-function 读取发卡库存条数(商品代号) {
-  return 读取发卡库存非空行(商品代号).length;
-}
-
-function 发卡取出前列(商品代号, 数量) {
-  const fp = 发卡库存文件路径(商品代号);
-  const 行 = 读取发卡库存非空行(商品代号);
-  if (行.length < 数量) {
-    return { ok: false, lines: [], reason: `库存不足（当前 ${行.length} 条，需要 ${数量} 条）` };
-  }
-  const 取出 = 行.slice(0, 数量);
-  const 剩余 = 行.slice(数量);
-  const dir = path.dirname(fp);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(fp, 剩余.join("\n") + (剩余.length ? "\n" : ""), "utf-8");
-  return { ok: true, lines: 取出 };
-}
-
-function 获取发卡商品单价(价格表, 商品名) {
-  if (!Object.prototype.hasOwnProperty.call(价格表, 商品名)) return null;
-  const v = 价格表[商品名];
-  const n = Number(v);
-  if (Number.isNaN(n) || n < 0) return null;
-  return n;
 }
 
 // 格式化字节为 GB/TB
@@ -643,6 +639,39 @@ function timeA(format, timestamp) {
     .replace(/H/g, hours)
     .replace(/i/g, minutes)
     .replace(/s/g, seconds);
+}
+
+/** group_increase 去重：QQ/协议层对官方机器人等会重复推送同一入群通知 */
+const mkGroupIncreaseDedup = new Map();
+const MK_GROUP_INCREASE_DEDUP_MS = 15000;
+const MK_GROUP_INCREASE_FUZZY_MS = 5000;
+
+function mkIsDuplicateGroupIncrease(event) {
+  const gid = String(event?.group_id ?? "");
+  const uid = String(event?.user_id ?? "");
+  if (!gid || !uid) return false;
+  const sub = String(event?.sub_type ?? "");
+  const op = String(event?.operator_id ?? "0");
+  const t = Number(event?.time) || Math.floor(Date.now() / 1000);
+  const exactKey = `${gid}|${uid}|${sub}|${op}|${t}`;
+  const now = Date.now();
+  for (const [k, ts] of mkGroupIncreaseDedup) {
+    if (now - ts > MK_GROUP_INCREASE_DEDUP_MS) mkGroupIncreaseDedup.delete(k);
+  }
+  if (mkGroupIncreaseDedup.has(exactKey)) return true;
+  const fuzzyPrefix = `${gid}|${uid}|`;
+  for (const [k, ts] of mkGroupIncreaseDedup) {
+    if (!k.startsWith(fuzzyPrefix)) continue;
+    if (now - ts < MK_GROUP_INCREASE_FUZZY_MS) return true;
+  }
+  mkGroupIncreaseDedup.set(exactKey, now);
+  return false;
+}
+
+/** 插件数据备份：私聊文件显示名（中文、无空格）例：MKbot数据备份_2026年07月10日14时41分00秒.zip */
+function mkBackupZipDisplayName(timestampSec) {
+  const sec = timestampSec != null ? timestampSec : Math.floor(Date.now() / 1000);
+  return `MKbot数据备份_${timeA("y", sec)}年${timeA("m", sec)}月${timeA("d", sec)}日${timeA("H", sec)}时${timeA("i", sec)}分${timeA("s", sec)}秒.zip`;
 }
 
 function timeB(format, timestamp) {
@@ -918,6 +947,11 @@ async function unzipFile(zipPath, extractPath) {
   }
 }
 
+
+
+
+
+
 // ================== 压缩文件或文件夹 ==================
 async function zipFile(sourcePath, outputZipPath) {
   try {
@@ -1127,19 +1161,57 @@ const MENU_BG_REMOTE_LANDSCAPE =
 const MENU_BG_REMOTE_PORTRAIT =
   "http://xn--mk-ub3cl61ae1v.xn--c5w857b.xn--fiqs8s/mkbot/image/shu.jpg";
 
-function resolveMenuBackgroundUrl(ctx, cs_of) {
-  if (
-    mkIsKakakeLikeFramework(ctx) &&
-    cs_of !== false &&
-    cs_of != false
-  ) {
-    const fields = buildHtmlBackgroundFields("heng.jpg");
-    if (fields.backgroundImageUrl) return fields.backgroundImageUrl;
+function resolveMenuBackgroundUrl(ctx, imageRenderOn) {
+  if (imageRenderOn === false || imageRenderOn == false) {
+    return "";
+  }
+  const fields = buildHtmlBackgroundFields("heng.jpg");
+  if (fields.backgroundImageUrl) return fields.backgroundImageUrl;
+  if (mkIsKakakeLikeFramework(ctx)) {
     try {
       logger?.warn?.("[Function] 菜单本地背景 heng.jpg 不可用，已切换远程");
     } catch (_e) {}
   }
   return "";
+}
+
+/** HTML 菜单渲染：puppeteer 页面无法加载 file://，本地图必须内联 data URL */
+function resolveMenuHtmlBackgroundUrl(ctx, imageRenderOn) {
+  if (imageRenderOn === false || imageRenderOn == false) {
+    return "";
+  }
+  const dataUrl = defaultResourceImageToDataUrl("heng.jpg");
+  if (dataUrl) return dataUrl;
+  const fields = buildHtmlBackgroundFields("heng.jpg");
+  const url = String(fields.backgroundImageUrl || "").trim();
+  if (url && !/^file:/i.test(url)) return url;
+  try {
+    logger?.warn?.("[Function] 菜单 HTML 本地背景不可用，已切换远程");
+  } catch (_e) {}
+  return MENU_BG_REMOTE_LANDSCAPE;
+}
+
+/** 默认资源/image 下本地图转 data URL（供 HTML puppeteer 内联背景） */
+function defaultResourceImageToDataUrl(rawName) {
+  const abs = resolveDefaultResourceImageAbs(rawName);
+  if (!abs || !fs.existsSync(abs)) return "";
+  try {
+    const ext = String(path.extname(abs) || "").toLowerCase();
+    const mimeMap = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+      ".gif": "image/gif",
+      ".svg": "image/svg+xml",
+    };
+    const mime = mimeMap[ext] || "application/octet-stream";
+    const buf = fs.readFileSync(abs);
+    if (!buf || !buf.length) return "";
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch (_e) {
+    return "";
+  }
 }
 
 /** 默认资源/image 下本地图候选名（精确名优先；无扩展名时再补常见后缀） */
@@ -1181,12 +1253,12 @@ function resolveDefaultResourceImageAbs(rawName) {
   return "";
 }
 
-function resolveStatusBackgroundImageCss(ctx, cs_of, preferLocal = true) {
+function resolveStatusBackgroundImageCss(ctx, imageRenderOn, preferLocal = true) {
   if (
     preferLocal &&
     mkIsKakakeLikeFramework(ctx) &&
-    cs_of !== false &&
-    cs_of != false
+    imageRenderOn !== false &&
+    imageRenderOn != false
   ) {
     const localCss = buildBgImageCss("运行状态.jpg");
     if (localCss) return localCss;
@@ -1216,22 +1288,23 @@ function buildBgImageCss(imageName) {
   }
   const resolveFortuneRemoteUrlFromConfig = (rawName) => resolveFortuneRemoteUrlFromList(rawName);
   const fileToDataUrl = (absPath) => {
+    if (!absPath || !fs.existsSync(absPath)) return "";
     try {
-      const ext = String(path.extname(absPath) || '').toLowerCase();
+      const ext = String(path.extname(absPath) || "").toLowerCase();
       const mimeMap = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.webp': 'image/webp',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
       };
-      const mime = mimeMap[ext] || 'application/octet-stream';
+      const mime = mimeMap[ext] || "application/octet-stream";
       const buf = fs.readFileSync(absPath);
-      if (!buf || !buf.length) return '';
-      return `data:${mime};base64,${buf.toString('base64')}`;
+      if (!buf || !buf.length) return "";
+      return `data:${mime};base64,${buf.toString("base64")}`;
     } catch (_e) {
-      return '';
+      return "";
     }
   };
   // 背景内联 dataURL 最大长度（可在 config.json 中配置 mkbot_bg_inline_max_kb，单位 KB）
@@ -1663,85 +1736,950 @@ function clipBroadcastLinePreview(line, max = 72) {
   return `${t.slice(0, max)}…`;
 }
 
-/** SnowLuma 等上报可能把 [ ] 编成 &#91; &#93;，需解码后再匹配关键词 */
-function decodeObHtmlEntities(text) {
-  return String(text ?? "")
-    .replace(/&#(\d+);/g, (_, n) => {
-      const code = parseInt(n, 10);
-      return Number.isFinite(code) ? String.fromCharCode(code) : _;
-    })
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => {
-      const code = parseInt(h, 16);
-      return Number.isFinite(code) ? String.fromCharCode(code) : _;
-    })
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-/** 从 OneBot 事件取纯文本（SnowLuma 等 array 格式下 raw_message 可能为空） */
-function resolveEventPlainMessage(event) {
-  let fromSegs = "";
-  if (typeof event?.message === "string" && event.message.trim()) {
-    fromSegs = decodeObHtmlEntities(event.message);
-  } else if (Array.isArray(event?.message)) {
-    for (const seg of event.message) {
-      if (!seg || typeof seg !== "object") continue;
-      if (seg.type === "text" && seg.data?.text != null) {
-        fromSegs += decodeObHtmlEntities(String(seg.data.text));
-      }
-    }
+/** 通过 get_msg 获取被引用消息的发送者 QQ（咔咔珂 / SnowLuma 等 OB11 宿主无 NapCat raw.records） */
+async function resolveQuotedMessageUserId(ctx, quotedMessageId) {
+  if (quotedMessageId == null || quotedMessageId === "") return undefined;
+  try {
+    const dp = botApiPayload(await BOTAPI(ctx, "get_msg", { message_id: quotedMessageId }));
+    const msg = (dp && typeof dp === "object") ? dp : {};
+    return msg?.user_id ?? msg?.sender?.user_id ?? msg?.raw?.records?.[0]?.senderUin;
+  } catch (_e) {
+    return undefined;
   }
-  const raw = decodeObHtmlEntities(String(event?.raw_message ?? ""));
-  if (fromSegs.length > raw.length) return fromSegs;
-  if (raw) return raw;
-  return fromSegs;
 }
 
-/** 合并 raw_message / message 段为可检索文本 */
-function eventMessagePlainText(event) {
-  const parts = [];
-  const raw = decodeObHtmlEntities(String(event?.raw_message ?? "").trim());
-  if (raw) parts.push(raw);
-  const segText = resolveEventPlainMessage(event);
-  if (segText && segText !== raw) parts.push(segText);
+/** 消息记录：私聊按好友 QQ 单独开关（路径与「好友续火」同类） */
+const MK_MSG_RECORD_HAOYOU_SWITCH = "筱筱吖/扩展功能/消息记录/好友开关.json";
+
+/** 消息记录：当前会话是否已开启（群聊走事件系统，私聊走好友开关） */
+function isMessageRecordEnabled(event) {
+  if (event?.message_type === "group" && event.group_id != null) {
+    return readB(`筱筱吖/事件系统/${event.group_id}.json`, "消息记录", "关闭") === "开启";
+  }
+  if (event?.message_type === "private") {
+    const qq = String(event.user_id ?? event.sender?.user_id ?? "");
+    if (!qq) return false;
+    return readB(MK_MSG_RECORD_HAOYOU_SWITCH, qq, "关闭") === "开启";
+  }
+  return false;
+}
+
+/** 消息记录：过滤协议/CQ 解析残留（如纯表情后多出的 "]"） */
+function isSpuriousRecordText(text) {
+  const t = String(text ?? "").trim();
+  if (!t) return true;
+  if (/^[\[\]]+$/.test(t)) return true;
+  return false;
+}
+
+/** 消息记录：仅使用结构化 message 段，保留原始顺序，不解析 CQ */
+function normalizeEventRecordSegments(event) {
   if (Array.isArray(event?.message)) {
-    for (const seg of event.message) {
-      if (!seg || typeof seg !== "object") continue;
-      const t = String(seg.type || "");
-      if (t === "json" || t === "xml") {
-        try {
-          parts.push(JSON.stringify(seg.data ?? {}));
-        } catch {
-          parts.push(String(seg.data ?? ""));
-        }
+    return event.message
+      .filter((seg) => seg && seg.type)
+      .filter((seg) => seg.type !== "text" || !isSpuriousRecordText(seg.data?.text))
+      .map((seg) => ({ type: seg.type, data: { ...(seg.data ?? {}) } }));
+  }
+  if (typeof event?.message === "string") {
+    const msg = decodeObHtmlEntities(event.message).trim();
+    if (!msg || isSpuriousRecordText(msg)) return [];
+    return [{ type: "text", data: { text: msg } }];
+  }
+  return [];
+}
+
+/** 消息记录：从 get_image/get_record/get_file 返回值解析本地路径 */
+function resolveApiMediaPath(result) {
+  const p = String(result?.file ?? "").trim();
+  if (!p) return null;
+  if (/^file:\/\//i.test(p)) return fileURLToPath(p);
+  if (fs.existsSync(p)) return p;
+  const rel = path.join(getDataPath() || ".", p);
+  if (fs.existsSync(rel)) return rel;
+  return null;
+}
+
+function extFromMediaName(name, fallback) {
+  const m = String(name ?? "").match(/(\.[a-z0-9]{1,8})(?:\?|$)/i);
+  return m ? m[1].toLowerCase() : fallback;
+}
+
+const MK_VIDEO_EXT_RE = /\.(mp4|mov|mkv|webm|avi|flv|m4v|3gp)(?:\?|$)/i;
+
+function mkRecordIsVideoLike(type, data) {
+  if (String(type) === "video") return true;
+  const names = [data?.file, data?.file_name, data?.name, data?.url].map((s) => String(s ?? ""));
+  return String(type) === "file" && names.some((n) => MK_VIDEO_EXT_RE.test(n));
+}
+
+function mkRecordResolveMediaExt(type, data, localPath) {
+  const names = [data?.file_name, data?.name, data?.file, localPath, data?.url];
+  for (const n of names) {
+    const e = extFromMediaName(String(n ?? ""), "");
+    if (e) return e;
+  }
+  if (type === "record") return ".mp3";
+  if (type === "video" || mkRecordIsVideoLike(type, data)) return ".mp4";
+  return ".bin";
+}
+
+function mkRecordNormalizeMediaKind(type, data) {
+  if (String(type) === "record") return "record";
+  if (mkRecordIsVideoLike(type, data)) return "video";
+  if (String(type) === "video") return "video";
+  return "file";
+}
+
+function mkRecordIsThumbPath(p) {
+  const low = String(p ?? "").toLowerCase();
+  return /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(low) || /[/\\]thumb[/\\]/i.test(low);
+}
+
+function mkRecordGetFileApiParams(data) {
+  const fileRef = String(data?.file ?? "").trim();
+  const fileId = String(data?.file_id ?? data?.fileId ?? "").trim();
+  if (fileRef && !fileRef.startsWith("/") && !/^https?:\/\//i.test(fileRef)) {
+    return { file: fileRef };
+  }
+  if (fileId) return { file_id: fileId };
+  if (fileRef) return { file: fileRef };
+  return null;
+}
+
+/** 消息记录：顶层元数据（时间/来源/QQ/昵称等，每条消息只写一次） */
+function buildMessageRecordMeta(event) {
+  const meta = {
+    time: Math.floor(Number(event?.time ?? Date.now() / 1000)),
+    来源: event.message_type === "group" ? "群聊" : "私聊",
+    QQ: String(event.user_id ?? event.sender?.user_id ?? ""),
+  };
+  const 昵称 = String(event.sender?.nickname ?? event.sender?.card ?? "").trim();
+  if (昵称) meta.昵称 = 昵称;
+  if (event.message_type === "group" && event.group_id != null) {
+    meta.群号 = String(event.group_id);
+  }
+  return meta;
+}
+
+/** 消息记录：将语音/视频/文件保存到 ziyuan（仅下载/复制，不执行）；超限或失败返回 skipped */
+const MK_MSG_RECORD_IMG_COOLDOWN_AFTER = 5;
+const MK_MSG_RECORD_IMG_COOLDOWN_MS = 1000;
+const MK_MSG_RECORD_MAX_FORWARD_DEPTH = 5;
+const MK_MSG_RECORD_MEDIA_SAVE_MAX = 15 * 1024 * 1024;
+
+async function saveRecordMediaToZiyuan(ctx, type, data, ziyuanDir, saveBaseName) {
+  const kind = mkRecordNormalizeMediaKind(type, data);
+  const size = Number(data.file_size ?? data.size ?? 0);
+  const saveMax = MK_MSG_RECORD_MEDIA_SAVE_MAX;
+  const typeName = kind === "record" ? "语音" : kind === "video" ? "视频" : "文件";
+  if (Number.isFinite(size) && size > saveMax) {
+    const mb = (size / (1024 * 1024)).toFixed(2);
+    return {
+      skipped: true,
+      reason: `[未记录${typeName}] 大小约 ${mb}MB，超过 15MB 限制，未保存到 ziyuan`,
+    };
+  }
+
+  const urlDirect = String(data.url ?? "").trim();
+  let localPath = null;
+  let ext = mkRecordResolveMediaExt(kind, data, "");
+
+  // 优先 ftn/直链下载（带正确扩展名，避免落盘成 .bin）
+  if (urlDirect && /^https?:\/\//i.test(urlDirect)) {
+    const dest = path.join(ziyuanDir, `${saveBaseName}${ext}`);
+    if (await downloadFile(urlDirect, dest, true)) return { path: `ziyuan/${saveBaseName}${ext}` };
+  }
+
+  if (kind === "record") {
+    const fileRef = String(data.file ?? data.file_id ?? "").trim();
+    if (fileRef) {
+      const r = await mkRecordSafeBotApi(
+        ctx,
+        "get_record",
+        { file: fileRef, out_format: "mp3" },
+        12000,
+      );
+      localPath = resolveApiMediaPath(r);
+      ext = ".mp3";
+      if (!localPath && r?.url && /^https?:\/\//i.test(String(r.url))) {
+        const dest = path.join(ziyuanDir, `${saveBaseName}.mp3`);
+        if (await downloadFile(String(r.url), dest, true)) return { path: `ziyuan/${saveBaseName}.mp3` };
+      }
+    }
+  } else {
+    const apiParams = mkRecordGetFileApiParams(data);
+    if (apiParams) {
+      const r = await mkRecordSafeBotApi(ctx, "get_file", apiParams, 12000);
+      const apiPath = resolveApiMediaPath(r);
+      const name = String(r?.file_name ?? data.file_name ?? data.name ?? data.file ?? "");
+      ext = mkRecordResolveMediaExt(kind, data, apiPath || name);
+      if (apiPath && !(kind === "video" && mkRecordIsThumbPath(apiPath))) {
+        localPath = apiPath;
+      }
+      const apiUrl = String(r?.url ?? "").trim();
+      if (!localPath && apiUrl && /^https?:\/\//i.test(apiUrl) && !mkRecordIsThumbPath(apiUrl)) {
+        const dest = path.join(ziyuanDir, `${saveBaseName}${ext}`);
+        if (await downloadFile(apiUrl, dest, true)) return { path: `ziyuan/${saveBaseName}${ext}` };
       }
     }
   }
-  return parts.join("\n");
-}
 
-/** NapCat 红包多为空消息；SnowLuma 多为带「QQ红包」文案或 HTML 实体 */
-function isQqRedPacketLikeEvent(event) {
-  const hay = eventMessagePlainText(event);
-  if (/QQ红包|qq红包|红包/i.test(hay)) return true;
-  const raw0 = String(event?.raw_message ?? "");
-  const emptyLegacy =
-    raw0 === "" && (!event?.message || (Array.isArray(event.message) && event.message.length === 0));
-  return emptyLegacy;
-}
-
-function normalizeObActionParams(params) {
-  if (!params || typeof params !== "object" || Array.isArray(params)) return params;
-  const p = { ...params };
-  for (const k of ["group_id", "user_id", "message_id"]) {
-    if (p[k] == null || p[k] === "") continue;
-    const n = Number(p[k]);
-    if (Number.isFinite(n)) p[k] = n;
+  if (localPath && fs.existsSync(localPath)) {
+    try {
+      const st = fs.statSync(localPath);
+      if (st.size > saveMax) {
+        const mb = (st.size / (1024 * 1024)).toFixed(2);
+        return {
+          skipped: true,
+          reason: `[未记录${typeName}] 实际大小约 ${mb}MB，超过 15MB 限制，未保存到 ziyuan`,
+        };
+      }
+    } catch (_e) {}
+    ext = mkRecordResolveMediaExt(kind, data, localPath);
+    const dest = path.join(ziyuanDir, `${saveBaseName}${ext}`);
+    if (!fs.existsSync(ziyuanDir)) fs.mkdirSync(ziyuanDir, { recursive: true });
+    fs.copyFileSync(localPath, dest);
+    return { path: `ziyuan/${saveBaseName}${ext}` };
   }
-  return p;
+  return {
+    skipped: true,
+    reason: `[未记录${typeName}] 无法下载或解析媒体文件（API 超时/无可用 url）`,
+  };
+}
+
+/** 消息记录：图床上传队列（排队/单次超过 5 张则每张间隔 1 秒） */
+let mkMsgRecImgChain = Promise.resolve();
+let mkMsgRecImgQueued = 0;
+let mkMsgRecImgCooldown = false;
+
+function mkMsgRecordUploadImghost(input) {
+  mkMsgRecImgQueued += 1;
+  if (mkMsgRecImgQueued > MK_MSG_RECORD_IMG_COOLDOWN_AFTER) {
+    mkMsgRecImgCooldown = true;
+  }
+  const run = mkMsgRecImgChain.then(async () => {
+    try {
+      if (mkMsgRecImgCooldown) {
+        await new Promise((r) => setTimeout(r, MK_MSG_RECORD_IMG_COOLDOWN_MS));
+      }
+      return await 上传图床(input);
+    } catch (e) {
+      return { code: -1, msg: String(e?.message || e || "图床上传异常") };
+    } finally {
+      mkMsgRecImgQueued = Math.max(0, mkMsgRecImgQueued - 1);
+      if (mkMsgRecImgQueued === 0) mkMsgRecImgCooldown = false;
+    }
+  });
+  mkMsgRecImgChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+function mkNormalizeForwardMessages(result) {
+  if (!result || typeof result !== "object") return [];
+  const data = result.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    if (Array.isArray(data.messages)) return data.messages;
+  }
+  if (Array.isArray(result.messages)) return result.messages;
+  if (Array.isArray(data)) return data;
+  return [];
+}
+
+function mkNormalizeNodeContent(raw) {
+  if (Array.isArray(raw)) return raw.filter((s) => s && s.type);
+  if (typeof raw === "string" && raw.trim()) {
+    return [{ type: "text", data: { text: raw } }];
+  }
+  return [];
+}
+
+/** 消息记录：带超时的 Promise（超时返回 null；吞掉迟到的 reject，避免整条记录卡死） */
+function mkRecordWithTimeout(promise, ms) {
+  let timer;
+  const guarded = Promise.resolve(promise).then(
+    (v) => v,
+    () => null,
+  );
+  return Promise.race([
+    guarded.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    }),
+  ]);
+}
+
+async function mkRecordSafeBotApi(ctx, action, params, timeoutMs = 8000) {
+  try {
+    const raw = await mkRecordWithTimeout(BOTAPI(ctx, action, params), timeoutMs);
+    if (raw == null) return null;
+    return botApiPayload(raw);
+  } catch (_e) {
+    return null;
+  }
+}
+
+function mkRecordPickImageSource(data, 图结果, 文件名) {
+  const 原链 = String(data?.url || "").trim();
+  if (原链 && /^https?:\/\//i.test(原链)) {
+    return { url: 原链, filename: 文件名 };
+  }
+  const 解链 = String(图结果?.url || 图结果?.file || "").trim();
+  if (!解链) return null;
+  if (/^https?:\/\//i.test(解链)) return { url: 解链, filename: 文件名 };
+  if (/^file:\/\//i.test(解链)) {
+    try {
+      return { filepath: fileURLToPath(解链), filename: 文件名 };
+    } catch (_e) {
+      return null;
+    }
+  }
+  if (fs.existsSync(解链)) return { filepath: 解链, filename: 文件名 };
+  return null;
+}
+
+async function mkRecordProcessImageSeg(ctx, data) {
+  const safe = data && typeof data === "object" ? data : {};
+  const 文件名 = String(safe.file || `mk_${Date.now()}.jpg`).trim();
+  const 原链 = String(safe.url || "").trim();
+  let 上传源 = null;
+
+  // 优先直链，避免对 forward 内 uuid 文件名长时间卡在 get_image
+  if (原链 && /^https?:\/\//i.test(原链)) {
+    上传源 = { url: 原链, filename: 文件名 };
+  } else if (safe.file) {
+    const 图结果 = await mkRecordSafeBotApi(ctx, "get_image", { file: safe.file }, 8000);
+    上传源 = mkRecordPickImageSource(safe, 图结果, 文件名);
+  }
+
+  if (上传源) {
+    try {
+      const 上传 = await mkMsgRecordUploadImghost(上传源);
+      if (上传?.code === 0 && 上传?.data?.url) {
+        return {
+          type: "image",
+          data: {
+            file: 文件名,
+            file_size: safe.file_size ?? safe.size ?? "",
+            sub_type: safe.sub_type ?? 0,
+            summary: safe.summary ?? "",
+            url: 上传.data.url,
+            source: 上传.data.source,
+          },
+        };
+      }
+      return {
+        type: "text",
+        data: {
+          text: `[未记录图片] 图床上传失败：${上传?.msg || "未知错误"}${原链 ? `；原链保留失败` : ""}`,
+        },
+      };
+    } catch (e) {
+      return {
+        type: "text",
+        data: { text: `[未记录图片] 图床异常：${e?.message || e}` },
+      };
+    }
+  }
+  return {
+    type: "text",
+    data: {
+      text: `[未记录图片] 无法解析图片源${文件名 ? `（${文件名}）` : ""}${原链 ? "" : "；get_image 超时或无 url"}`,
+    },
+  };
+}
+
+async function mkRecordProcessMediaSeg(ctx, type, data, 资源目录, saveBaseName) {
+  const kind = mkRecordNormalizeMediaKind(type, data);
+  try {
+    const result = await saveRecordMediaToZiyuan(ctx, kind, data, 资源目录, saveBaseName);
+    if (result?.skipped) {
+      return { type: "text", data: { text: String(result.reason || `[未记录${kind}]`) } };
+    }
+    const 媒体data = {
+      file_size: String(data?.file_size ?? data?.size ?? ""),
+    };
+    const fname = String(data?.file_name ?? data?.name ?? data?.file ?? "").trim();
+    if (fname) 媒体data.file_name = fname;
+    if (result?.path) 媒体data.path = result.path;
+    return { type: kind, data: 媒体data };
+  } catch (e) {
+    const typeName = kind === "record" ? "语音" : kind === "video" ? "视频" : "文件";
+    return {
+      type: "text",
+      data: { text: `[未记录${typeName}] 处理异常：${e?.message || e}` },
+    };
+  }
+}
+
+async function mkRecordParseForwardMessageList(ctx, messages, opts, depth) {
+  const nodes = [];
+  for (const raw of messages) {
+    if (!raw || typeof raw !== "object") continue;
+    const msg = raw;
+    if (msg.type === "node") {
+      const d = msg.data && typeof msg.data === "object" ? msg.data : {};
+      const name = String(d.name ?? d.nickname ?? "用户");
+      const uin = String(d.uin ?? d.user_id ?? "");
+      const timeRaw = d.time;
+      const time = timeRaw != null && String(timeRaw).trim() !== "" ? Number(timeRaw) : undefined;
+      const contentSegs = mkNormalizeNodeContent(d.content ?? d.message);
+      const 内容 = await mkRecordProcessSegments(ctx, contentSegs, opts, depth);
+      if (!内容.length) continue;
+      const node = { name, uin, 内容 };
+      if (Number.isFinite(time)) node.time = time;
+      nodes.push(node);
+      continue;
+    }
+    const contentSegs = mkNormalizeNodeContent(msg.message ?? msg.content);
+    if (!contentSegs.length) continue;
+    const sender = msg.sender && typeof msg.sender === "object" ? msg.sender : {};
+    const name = String(sender.nickname ?? sender.card ?? msg.nickname ?? "用户");
+    const uin = String(msg.user_id ?? sender.user_id ?? sender.uin ?? "");
+    const timeRaw = msg.time;
+    const time = timeRaw != null && String(timeRaw).trim() !== "" ? Number(timeRaw) : undefined;
+    const 内容 = await mkRecordProcessSegments(ctx, contentSegs, opts, depth);
+    if (!内容.length) continue;
+    const node = { name, uin, 内容 };
+    if (Number.isFinite(time)) node.time = time;
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+async function mkRecordFetchForwardNodes(ctx, forwardId, opts, depth) {
+  if (depth > MK_MSG_RECORD_MAX_FORWARD_DEPTH || !String(forwardId || "").trim()) return [];
+  try {
+    const raw = await mkRecordWithTimeout(
+      BOTAPI(ctx, "get_forward_msg", { id: String(forwardId) }),
+      15000,
+    );
+    if (raw == null) {
+      logger?.warn?.("[消息记录] get_forward_msg 超时:", forwardId);
+      return [];
+    }
+    const payload = botApiPayload(raw) ?? raw;
+    let messages = mkNormalizeForwardMessages(payload);
+    if (!messages.length) messages = mkNormalizeForwardMessages(raw);
+    return mkRecordParseForwardMessageList(ctx, messages, opts, depth);
+  } catch (err) {
+    logger?.warn?.("[消息记录] get_forward_msg 失败:", err?.message || err);
+    return [];
+  }
+}
+
+/** 消息记录：递归处理消息段（含 forward 节点展开） */
+async function mkRecordProcessSegments(ctx, segments, opts, depth = 0) {
+  const { 消息id, 资源目录 } = opts;
+  const 内容 = [];
+  if (!Array.isArray(segments) || !segments.length) return 内容;
+  if (!opts.mediaSeq) opts.mediaSeq = { n: 0 };
+
+  for (const 段 of segments) {
+    try {
+      if (!段 || !段.type) continue;
+      const 类型 = String(段.type);
+
+      if (类型 === "face") {
+        内容.push({
+          type: "face",
+          data: { id: String(段?.data?.id ?? 段?.data?.raw?.faceIndex ?? "") },
+        });
+        continue;
+      }
+      if (类型 === "text") {
+        const text = String(段?.data?.text ?? "");
+        if (isSpuriousRecordText(text)) continue;
+        内容.push({ type: "text", data: { text } });
+        continue;
+      }
+      if (类型 === "at") {
+        内容.push({ type: "at", data: { qq: String(段?.data?.qq ?? "") } });
+        continue;
+      }
+      if (类型 === "reply") {
+        内容.push({ type: "reply", data: { id: String(段?.data?.id ?? "") } });
+        continue;
+      }
+      if (类型 === "image") {
+        内容.push(await mkRecordProcessImageSeg(ctx, 段?.data ?? {}));
+        continue;
+      }
+      if (类型 === "json" || 类型 === "xml") {
+        const raw = 段?.data?.data ?? 段?.data?.xml ?? 段?.data;
+        let payload = raw;
+        if (payload != null && typeof payload !== "string") {
+          try {
+            payload = JSON.stringify(payload);
+          } catch (_e) {
+            payload = String(payload);
+          }
+        }
+        内容.push({ type: 类型, data: { data: String(payload ?? "") } });
+        continue;
+      }
+      if (类型 === "record" || 类型 === "video" || 类型 === "file") {
+        opts.mediaSeq.n += 1;
+        const saveBaseName = `${消息id}_${opts.mediaSeq.n}`;
+        内容.push(await mkRecordProcessMediaSeg(ctx, 类型, 段?.data ?? {}, 资源目录, saveBaseName));
+        continue;
+      }
+      if (类型 === "forward" || 类型 === "node") {
+        if (depth >= MK_MSG_RECORD_MAX_FORWARD_DEPTH) {
+          内容.push({
+            type: "text",
+            data: { text: `[未记录转发] 嵌套深度超过 ${MK_MSG_RECORD_MAX_FORWARD_DEPTH} 层` },
+          });
+          continue;
+        }
+        let nodes = [];
+        if (类型 === "node") {
+          nodes = await mkRecordParseForwardMessageList(ctx, [段], opts, depth + 1);
+        } else {
+          const data = 段?.data && typeof 段.data === "object" ? 段.data : {};
+          if (Array.isArray(data.content) && data.content.length) {
+            nodes = await mkRecordParseForwardMessageList(ctx, data.content, opts, depth + 1);
+          } else if (data.id != null && String(data.id).trim()) {
+            nodes = await mkRecordFetchForwardNodes(ctx, String(data.id), opts, depth + 1);
+          }
+        }
+        if (nodes.length) {
+          for (const node of nodes) {
+            内容.push({
+              type: "node",
+              data: {
+                name: node.name,
+                uin: node.uin,
+                ...(node.time != null ? { time: node.time } : {}),
+                内容: node.内容,
+              },
+            });
+          }
+        } else {
+          内容.push({
+            type: "text",
+            data: { text: "[未记录转发] 未能解析 forward 节点内容（超时或空节点）" },
+          });
+        }
+        continue;
+      }
+      内容.push({
+        type: 类型,
+        data: {
+          ...(段?.data && typeof 段.data === "object"
+            ? Object.fromEntries(
+                Object.entries(段.data).filter(([, v]) => {
+                  const t = typeof v;
+                  return v == null || t === "string" || t === "number" || t === "boolean";
+                }),
+              )
+            : {}),
+        },
+      });
+    } catch (e) {
+      内容.push({
+        type: "text",
+        data: { text: `[未记录段落] 处理异常：${e?.message || e}` },
+      });
+    }
+  }
+  return 内容;
+}
+
+/** 消息记录：后台队列（主流程只入队，多条并行处理，写入串行合并防丢） */
+const mkMsgRecordPendingByFile = new Map();
+let mkMsgRecordFlushChain = Promise.resolve();
+
+function mkGetMessageRecordPaths() {
+  const 读写根 = getDataPath() || ".";
+  const 记录目录 = path.join(path.dirname(path.dirname(读写根)), "消息记录");
+  return {
+    记录目录,
+    资源目录: path.join(记录目录, "ziyuan"),
+    记录文件: path.join(记录目录, "shuju.json"),
+  };
+}
+
+function mkPrepareMessageRecordJob(ctx, event) {
+  const 消息id = String(event?.message_id ?? "").trim();
+  const 消息段列表 = normalizeEventRecordSegments(event);
+  if (!消息id || !消息段列表.length) return null;
+  return {
+    ctx,
+    消息id,
+    消息段列表,
+    meta: buildMessageRecordMeta(event),
+    paths: mkGetMessageRecordPaths(),
+  };
+}
+
+async function mkBuildMessageRecordContent(ctx, job) {
+  const { 消息id, 消息段列表, paths } = job;
+  return mkRecordProcessSegments(ctx, 消息段列表, {
+    消息id,
+    资源目录: paths.资源目录,
+    mediaSeq: { n: 0 },
+  }, 0);
+}
+
+function mkStageMessageRecordEntry(记录文件, 消息id, entry) {
+  if (!mkMsgRecordPendingByFile.has(记录文件)) {
+    mkMsgRecordPendingByFile.set(记录文件, new Map());
+  }
+  mkMsgRecordPendingByFile.get(记录文件).set(消息id, entry);
+}
+
+function mkFlushMessageRecordFile(记录文件) {
+  const pending = mkMsgRecordPendingByFile.get(记录文件);
+  if (!pending || pending.size === 0) return;
+  const batch = new Map(pending);
+  pending.clear();
+  let 库 = {};
+  if (fs.existsSync(记录文件)) {
+    try {
+      库 = JSON.parse(fs.readFileSync(记录文件, "utf8") || "{}");
+    } catch (_e) {
+      库 = {};
+    }
+  }
+  for (const [id, entry] of batch) {
+    库[id] = entry;
+  }
+  const dir = path.dirname(记录文件);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(记录文件, JSON.stringify(库, null, 2), "utf8");
+}
+
+function mkScheduleMessageRecordFlush(记录文件) {
+  mkMsgRecordFlushChain = mkMsgRecordFlushChain
+    .then(() => {
+      mkFlushMessageRecordFile(记录文件);
+    })
+    .catch((err) => {
+      logger?.warn?.("[消息记录] 刷盘失败:", err);
+    });
+}
+
+async function mkProcessMessageRecordJob(job) {
+  const { ctx, 消息id, meta, paths } = job;
+  const { 记录目录, 资源目录, 记录文件 } = paths;
+  if (!fs.existsSync(记录目录)) fs.mkdirSync(记录目录, { recursive: true });
+  if (!fs.existsSync(资源目录)) fs.mkdirSync(资源目录, { recursive: true });
+  const 内容 = await mkBuildMessageRecordContent(ctx, job);
+  if (!内容.length) return;
+  mkStageMessageRecordEntry(记录文件, 消息id, { ...meta, 内容 });
+  mkScheduleMessageRecordFlush(记录文件);
+}
+
+/** 主流程调用：同步入队后立即返回，不 await */
+function mkEnqueueMessageRecord(ctx, event) {
+  const job = mkPrepareMessageRecordJob(ctx, event);
+  if (!job) return;
+  setImmediate(() => {
+    mkProcessMessageRecordJob(job).catch((err) => {
+      logger?.warn?.("[消息记录] 后台处理失败:", err);
+    });
+  });
+}
+
+/** 消息记录：shuju.json 绝对路径（供 readB 按键读取） */
+function mkMessageRecordShujuFile() {
+  return mkGetMessageRecordPaths().记录文件;
+}
+
+function mkMsgRecordAbsMediaPath(relOrUrl) {
+  const s = String(relOrUrl ?? "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s) || /^file:\/\//i.test(s)) return s;
+  const norm = s.replace(/\\/g, "/");
+  if (norm.startsWith("ziyuan/")) {
+    return path.join(mkGetMessageRecordPaths().记录目录, norm);
+  }
+  if (path.isAbsolute(s) && fs.existsSync(s)) return s;
+  return s;
+}
+
+function mkMsgRecordLooksLikeVideoFile(absPath) {
+  const p = String(absPath ?? "").trim();
+  if (!p || !fs.existsSync(p)) return false;
+  try {
+    const fd = fs.openSync(p, "r");
+    const buf = Buffer.alloc(12);
+    fs.readSync(fd, buf, 0, 12, 0);
+    fs.closeSync(fd);
+    if (buf.slice(4, 8).toString() === "ftyp") return true;
+    if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return true;
+  } catch (_e) {}
+  return false;
+}
+
+function mkMsgRecordResolveVideoSrc(data) {
+  const src = mkMsgRecordAbsMediaPath(data.path || data.url || data.file || "");
+  if (!src) return "";
+  if (mkRecordIsVideoLike("file", data) || mkMsgRecordLooksLikeVideoFile(src)) return src;
+  return "";
+}
+
+function mkFormatRecordTime(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return "未知时间";
+  try {
+    return timeA("y-m-d H:i:s", Math.floor(n));
+  } catch (_e) {
+    const d = new Date(Math.floor(n) * 1000);
+    if (Number.isNaN(d.getTime())) return String(sec);
+    const p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+}
+
+/** 将记录内容段转为 OB11 段；顶层语音可拆出单独发送，嵌套内语音只占位 */
+function mkMsgRecordContentToOb11(内容, { extractVoice = false } = {}) {
+  const segs = [];
+  const voices = [];
+  if (!Array.isArray(内容)) return { segs, voices };
+  for (const item of 内容) {
+    if (!item || typeof item !== "object") continue;
+    const type = String(item.type ?? "");
+    const data = item.data && typeof item.data === "object" ? item.data : {};
+    if (type === "text") {
+      const t = String(data.text ?? "");
+      if (t) segs.push(段_文本(t));
+      continue;
+    }
+    if (type === "image") {
+      const src = String(data.url || data.file || "").trim();
+      if (src) segs.push(段_图片(mkMsgRecordAbsMediaPath(src) || src));
+      else segs.push(段_文本("[图片]"));
+      continue;
+    }
+    if (type === "face") {
+      const id = String(data.id ?? "").trim();
+      if (id) segs.push(段_表情(id));
+      continue;
+    }
+    if (type === "at") {
+      segs.push(段_艾特(data.qq));
+      continue;
+    }
+    if (type === "reply") {
+      segs.push(段_文本(`[回复消息:${data.id ?? ""}]`));
+      continue;
+    }
+    if (type === "json" || type === "xml") {
+      const raw = data.data ?? data.xml ?? data;
+      if (raw != null && String(raw).trim()) {
+        segs.push(段_Json(raw));
+      } else {
+        segs.push(段_文本(`[${type === "json" ? "JSON卡片" : "XML卡片"}]`));
+      }
+      continue;
+    }
+    if (type === "video" || (type === "file" && mkRecordIsVideoLike("file", data))) {
+      const src = mkMsgRecordResolveVideoSrc(data) || mkMsgRecordAbsMediaPath(data.path || data.url || data.file || "");
+      if (src) segs.push(段_视频(src));
+      else {
+        const name = String(data.file_name || data.name || data.file || "视频");
+        segs.push(段_文本(`[视频] ${name}`));
+      }
+      continue;
+    }
+    if (type === "file") {
+      const src = mkMsgRecordAbsMediaPath(data.path || data.url || data.file || "");
+      const name = String(data.file_name || data.name || "文件");
+      if (src && mkMsgRecordLooksLikeVideoFile(src)) {
+        segs.push(段_视频(src));
+        continue;
+      }
+      if (src && /\.(png|jpe?g|gif|webp|bmp)$/i.test(src)) segs.push(段_图片(src));
+      else segs.push(段_文本(`[文件] ${name}${data.file_size ? ` (${data.file_size}B)` : ""}`));
+      continue;
+    }
+    if (type === "record") {
+      const src = mkMsgRecordAbsMediaPath(data.path || data.url || data.file || "");
+      if (extractVoice && src) {
+        voices.push(src);
+        segs.push(段_文本("[语音消息，已单独发送]"));
+      } else {
+        segs.push(段_文本("[语音消息]"));
+      }
+      continue;
+    }
+    if (type === "node") {
+      // 嵌套由上层组 嵌套合并节点，这里不展开为平铺段
+      continue;
+    }
+    segs.push(段_文本(`[${type || "未知"}消息]`));
+  }
+  if (!segs.length) segs.push(段_文本("[空内容]"));
+  return { segs, voices };
+}
+
+function mkMsgRecordNestedChildrenFromNodes(节点列表) {
+  const children = [];
+  if (!Array.isArray(节点列表)) return children;
+  for (const item of 节点列表) {
+    if (!item || item.type !== "node") continue;
+    const d = item.data && typeof item.data === "object" ? item.data : {};
+    const name = String(d.name || "用户");
+    const uin = String(d.uin || "0");
+    const { segs } = mkMsgRecordContentToOb11(d.内容, { extractVoice: false });
+    const extra = {};
+    if (d.time != null && Number.isFinite(Number(d.time))) extra.time = Number(d.time);
+    children.push(合并节点(name, uin, segs, extra));
+  }
+  return children;
+}
+
+async function mkHandleMessageRecallNotify(event, ctx) {
+  const noticeType = String(event?.notice_type ?? "");
+  if (noticeType !== "group_recall" && noticeType !== "friend_recall") return false;
+
+  const fakeSwitchEvent =
+    noticeType === "group_recall"
+      ? { message_type: "group", group_id: event.group_id, user_id: event.user_id }
+      : { message_type: "private", user_id: event.user_id };
+
+  if (!isMessageRecordEnabled(fakeSwitchEvent)) {
+    logger?.info?.("[消息记录·撤回] 未开启消息记录，忽略", {
+      noticeType,
+      group_id: event.group_id,
+      user_id: event.user_id,
+      message_id: event.message_id,
+    });
+    return true;
+  }
+
+  const 消息id = String(event.message_id ?? "").trim();
+  if (!消息id) {
+    logger?.info?.("[消息记录·撤回] 无 message_id，忽略");
+    return true;
+  }
+
+  const 记录文件 = mkMessageRecordShujuFile();
+  const entry = readB(记录文件, 消息id, null);
+  if (!entry || typeof entry !== "object") {
+    logger?.info?.("[消息记录·撤回] shuju.json 无对应记录", { 消息id, 记录文件 });
+    return true;
+  }
+
+  const meta = entry;
+  const 内容 = Array.isArray(entry.内容) ? entry.内容 : [];
+  const 来源 = String(meta.来源 || (noticeType === "group_recall" ? "群聊" : "私聊"));
+  const QQ = String(meta.QQ || event.user_id || "");
+  const 昵称 = String(meta.昵称 || "").trim() || QQ || "未知";
+  const 群号 = String(meta.群号 || event.group_id || "").trim();
+  let 群名 = String(event.group_name || "").trim();
+  if (群号 && !群名) {
+    try {
+      const gi = botApiPayload(await BOTAPI(ctx, "get_group_info", { group_id: 群号 }));
+      群名 = String(gi?.group_name || "").trim();
+    } catch (_e) {}
+  }
+  const 时间文 = mkFormatRecordTime(meta.time);
+  const 操作者 = String(event.operator_id ?? event.user_id ?? "");
+  const 头像 = `https://q4.qlogo.cn/g?b=qq&nk=${QQ || event.user_id}&s=100`;
+
+  let 概览 =
+    `【消息撤回通知】\n` +
+    `来源：${来源}\n` +
+    `时间：${时间文}\n` +
+    `名字：${昵称}\n` +
+    `QQ：${QQ}`;
+  if (群号) 概览 += `\n群号：${群号}`;
+  if (群名) 概览 += `\n群名：${群名}`;
+  if (操作者) 概览 += `\n操作者：${操作者}`;
+  概览 += `\n消息ID：${消息id}`;
+
+  const selfId = String(event.self_id ?? ctx?.core?.selfInfo?.uin ?? "");
+  const ownerQQs = readB("config.json", "OwnerQQs", []);
+  const 主人 =
+    Array.isArray(ownerQQs) && ownerQQs.length
+      ? String(ownerQQs[0]).trim()
+      : selfId;
+  if (!主人) {
+    logger?.warn?.("[消息记录·撤回] 无主人且无 self_id，无法推送", { 消息id });
+    return true;
+  }
+  const fakeEvent = { message_type: "private", user_id: 主人 };
+  const 显示名 = 昵称;
+  const 显示QQ = QQ || selfId || "0";
+
+  const nodes = [
+    合并节点("消息概览", 显示QQ, [段_图片(头像), 段_文本(概览)], {
+      time: Number(meta.time) || Math.floor(Date.now() / 1000),
+    }),
+  ];
+  const topVoices = [];
+
+  const onlyNodes = 内容.length > 0 && 内容.every((x) => x?.type === "node");
+  const hasNode = 内容.some((x) => x?.type === "node");
+  const flatItems = 内容.filter((x) => x?.type && x.type !== "node");
+
+  if (onlyNodes) {
+    const children = mkMsgRecordNestedChildrenFromNodes(内容);
+    nodes.push(
+      嵌套合并节点(
+        "原合并转发",
+        显示QQ,
+        children.length ? children : [合并节点("空", 显示QQ, [段_文本("[空合并转发]")])],
+        { time: Number(meta.time) || undefined },
+        [段_文本("以下为被撤回的合并转发内容")],
+      ),
+    );
+  } else {
+    if (flatItems.length) {
+      const { segs, voices } = mkMsgRecordContentToOb11(flatItems, { extractVoice: true });
+      topVoices.push(...voices);
+      nodes.push(合并节点(显示名, 显示QQ, segs, { time: Number(meta.time) || undefined }));
+    }
+    if (hasNode) {
+      const children = mkMsgRecordNestedChildrenFromNodes(内容.filter((x) => x?.type === "node"));
+      if (children.length) {
+        nodes.push(
+          嵌套合并节点("嵌套合并转发", 显示QQ, children, { time: Number(meta.time) || undefined }, [
+            段_文本("内含嵌套合并转发"),
+          ]),
+        );
+      }
+    }
+    if (nodes.length === 1) {
+      nodes.push(合并节点(显示名, 显示QQ, [段_文本("[无正文内容]")], { time: Number(meta.time) || undefined }));
+    }
+  }
+
+  const preview = 合并预览(
+    "消息记录·撤回",
+    `${昵称} 撤回了一条消息`,
+    "[撤回消息追回]",
+    [
+      `来源：${来源}${群号 ? ` · ${群号}` : ""}`,
+      `时间：${时间文}`,
+      `名字：${昵称}（${QQ}）`,
+      ...(群名 ? [`群名：${群名}`] : []),
+      `消息ID：${消息id}`,
+    ],
+  );
+
+  try {
+    await 发合并消息(fakeEvent, nodes, preview);
+    for (const vp of topVoices) {
+      try {
+        await 发语音(fakeEvent, vp);
+      } catch (e) {
+        logger?.warn?.("[消息记录·撤回] 单独发送语音失败:", e?.message || e);
+        await 发消息(fakeEvent, [段_文本(`[语音发送失败] ${vp}`)]);
+      }
+    }
+    logger?.info?.("[消息记录·撤回] 已推送给主人", { 主人, 消息id, 语音数: topVoices.length });
+  } catch (e) {
+    logger?.warn?.("[消息记录·撤回] 推送失败:", e?.message || e);
+  }
+  return true;
 }
 
 /** 从消息段收集图片 URL（每段只取一次，避免 url+file 重复） */
@@ -1791,6 +2729,11 @@ async function BOTAPI(ctx, action, params) {
     logger?.warn?.(`[BOTAPI] ${action} 异常:`, error?.message || error);
     throw error;
   }
+}
+
+/** 从 BOTAPI / actions.call 返回值取 data 载荷（兼容 SnowLuma / NapCat OB11 包装） */
+function botApiPayload(result) {
+  return mkExtractBotApiPayload(result);
 }
 
 async function fetchAPI(url, method = "GET", data = null) {
@@ -1855,7 +2798,7 @@ async function checkAuthStatus(event) {
   return checkAuthStatusImpl(readB, writeB, event);
 }
 
-const array_shijian = ["禁言通知","入群审核","邀人统计","自助头衔","伪造聊天","黑白名单","退群拉黑","退群通知","整点报时","禁发红包","入群欢迎","违禁检测","进阶检测","发言统计","群聊续火","视频解析","问答系统","管理模式","入群验证","马甲系统","入群私聊"];
+const array_shijian = ["禁言通知","入群审核","邀人统计","自助头衔","伪造聊天","黑白名单","退群拉黑","退群通知","整点报时","禁发红包","入群欢迎","违禁检测","进阶检测","发言统计","群聊续火","视频解析","问答系统","管理模式","入群验证","马甲系统","入群私聊","消息记录"];
 const array_RCshijian = ["全群打卡","自动点赞","好友续火","自动备份","受邀同意"];
 const RC_group_role ={
     "owner":3,
@@ -1863,6 +2806,74 @@ const RC_group_role ={
     "member":1,
     "unknown":0
 };
+
+const MK_骨灰_秒上限 = 365 * 86400;
+const MK_骨灰_秒下限 = 3600;
+const MK_骨灰_默认标准秒 = 7 * 86400;
+const MK_骨灰_预设标准秒 = {
+    "七日": 7 * 86400,
+    "半月": 15 * 86400,
+    "一月": 30 * 86400,
+};
+
+function mk骨灰获取标准路径(groupId) {
+    return `筱筱吖/群管系统/清理骨灰/${groupId}/获取标准.json`;
+}
+
+function mk读取骨灰获取标准秒(groupId) {
+    const v = Number(readB(mk骨灰获取标准路径(groupId), "秒数", MK_骨灰_默认标准秒));
+    return v > 0 ? v : MK_骨灰_默认标准秒;
+}
+
+function mk格式化骨灰标准秒(秒数) {
+    const n = Number(秒数) || 0;
+    const 月秒 = 30 * 86400;
+    if (n > 0 && n % 月秒 === 0) {
+        return `${n / 月秒}月`;
+    }
+    if (n > 0 && n % 86400 === 0) {
+        return `${n / 86400}天`;
+    }
+    return `${n}秒`;
+}
+
+function mk骨灰筛选标准标签(前缀) {
+    if (前缀 === "七日") return "七日";
+    if (前缀 === "半月") return "半月";
+    if (前缀 === "一月") return "一月";
+    return "默认";
+}
+
+function mk解析骨灰获取标准指令(message) {
+    const m = message.match(/^设置骨灰获取标准([0-9]+)(天|月|)$/);
+    if (!m) return null;
+    const 数值 = Number(m[1]);
+    const 单位 = m[2];
+    if (!Number.isFinite(数值) || 数值 <= 0) {
+        return { ok: false, err: "数值无效，请携带正整数" };
+    }
+    let 秒数;
+    if (单位 === "天") {
+        if (数值 > 365) {
+            return { ok: false, err: "天数不能超过365天" };
+        }
+        秒数 = 数值 * 86400;
+    } else if (单位 === "月") {
+        if (数值 > 12) {
+            return { ok: false, err: "月数不能超过12月" };
+        }
+        秒数 = 数值 * 30 * 86400;
+    } else {
+        秒数 = 数值;
+    }
+    if (秒数 < MK_骨灰_秒下限) {
+        return { ok: false, err: `最低标准为${MK_骨灰_秒下限}秒` };
+    }
+    if (秒数 > MK_骨灰_秒上限) {
+        return { ok: false, err: `最高标准为365天（${MK_骨灰_秒上限}秒）` };
+    }
+    return { ok: true, 秒数, 展示: mk格式化骨灰标准秒(秒数) };
+}
 
 /** 与 QQ 客户端「需要身份验证 → 回答问题并由管理员审核」对齐的问题文案（仅 NapCat 已有 set_group_add_option 能改的部分） */
 const MK_JOIN_AUDIT_QQ_QUESTION = "你来干什么的";
@@ -2101,10 +3112,78 @@ if(zhushou_of == true){
 const RC_sq = await checkAuthStatus(event);
 const RC_music_bbh = `1.1.0`;
 
+// ================== Q群管家 token 采集（2854196310 · autoreply JSON） ==================
+if (event.message_type === "group") {
+    captureGuanjiaTokenFromMessage(event, readB, writeB);
+}
+
 // ================== 深度娱乐开关 ==================
 const 娱乐_来源 = event.message_type == "group" ? event.group_id : "私聊";
 const 深度娱乐路径 = readB("config.json", "深度娱乐路径", "筱筱吖/娱乐系统/深度娱乐/娱乐模式.json");
 const 娱乐_开关 = readB(深度娱乐路径, 娱乐_来源, true);
+
+
+
+
+// ================== 字数限制&行数限制 ==================
+if (event.message_type == "group") {
+    // 判断开关 & 授权
+    const 进阶开关 = readB(`筱筱吖/事件系统/${event.group_id}.json`, "进阶检测", "关闭");
+    if (RC_sq == "已授权" && 进阶开关 == "开启") {
+        // 统计艾特
+        const atList = giveAT(event.message);
+        const 艾特人数 = atList.length;
+        // 获取各项限制配置
+        const 限制字数 = Number(readB(`筱筱吖/群管功能/发言限制/${event.group_id}.json`, "字数", 0));
+        const 限制行数 = Number(readB(`筱筱吖/群管功能/发言限制/${event.group_id}.json`, "行数", 0));
+        const 限制艾特 = Number(readB(`筱筱吖/群管功能/发言限制/${event.group_id}.json`, "艾特", 0));
+        // 任意限制开启则校验
+        if (限制字数 !== 0 || 限制行数 !== 0 || 限制艾特 !== 0) {
+            const 纯文字 = eventUserTextFromSegments(event);
+            const 字数 = 纯文字.length || 0;
+            const 行数 = 纯文字 ? 纯文字.split('\n').length : 0;
+            let 超限 = false;
+            let 提示 = "发言超出限制啦！";
+            if (限制字数 != 0 && 字数 > 限制字数) {
+                超限 = true;
+                提示 += `\n字数上限：${限制字数}，当前：${字数}字`;
+            }
+            if (限制行数 != 0 && 行数 > 限制行数) {
+                超限 = true;
+                提示 += `\n行数上限：${限制行数}，当前：${行数}行`;
+            }
+            if (限制艾特 != 0 && 艾特人数 > 限制艾特) {
+                超限 = true;
+                提示 += `\n艾特上限：${限制艾特}，当前：${艾特人数}人`;
+            }
+            // 超限执行撤回
+            if (超限) {
+                try {
+                    // 获取机器人自身身份
+                    const dp188 = await BOTAPI(ctx, "get_group_member_info", {
+                        group_id: event.group_id,
+                        user_id: event.self_id
+                    });
+                    const Robot身份 = RC_group_role[(dp188?.role || "member")] || 0;
+                    // 获取发言者标准身份（修复缺失user_id报错）
+                    const dp199 = await BOTAPI(ctx, "get_group_member_info", {
+                        group_id: event.group_id,
+                        user_id: event.user_id
+                    });
+                    const 目标身份 = RC_group_role[(dp199?.role || "member")] || 0;
+                    // 机器人权限高于对方 / 自己发的消息 可撤回
+                    if (Robot身份 > 目标身份 || Robot身份 === 3 || event.user_id === event.self_id) {
+                        await BOTAPI(ctx, "delete_msg", { message_id: event.message_id });
+                    }
+                } catch (err) {
+                    logger.error("[发言限制] 查询群成员/撤回接口异常：", err);
+                }
+                return null;
+            }
+        }
+    }
+}
+
 
 // ================== 发言统计 ==================
 //为了最大真实效果记录发言统计数量
@@ -2135,9 +3214,9 @@ if(message.match(/([\s\S]*)/)){//匹配全部消息
                         let dp199 = await BOTAPI(ctx, "get_group_member_info", 参数199);
                         let User身份 = (RC_group_role[(dp199?.role || "member")] || 0);//目标身份
                         if(Robot身份 > User身份){
-                            let 内容 = message.match(/([\s\S]*)/)[1];
+                            let 内容 = eventUserTextFromSegments(event).trim();
                             let 可用次数 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, "可用次数", 5);
-                            if(内容 != 值){
+                            if(内容 != String(值)){
                                 let 已用次数 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, event.user_id, 0);
                                 // ================== 是否超标 ==================
                                 if(已用次数 >= 可用次数){
@@ -2145,20 +3224,25 @@ if(message.match(/([\s\S]*)/)){//匹配全部消息
                                     BOTAPI(ctx, "set_group_kick_members", 参数);
                                     await 发消息(event, [段_文本(`【通报】\n[用户]:${event.user_id}\n在规定次数内未成功验证，已处理！`)]);
                                     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "废物");
+                                    writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+                                    writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
                                     return null;
                                 }else{
                                     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, event.user_id, 已用次数 + 1);
                                     await BOTAPI(ctx, "delete_msg", {message_id: event.message_id});//撤回
                                     let 已用_次数 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, event.user_id, 0);
-                                    await 发消息(event, [段_艾特(event.user_id), 段_文本(` (${event.user_id})\n验证码错误！\n你的验证码是:${值}\n剩余验证次数:${可用次数 - 已用_次数}`)]);
+                                    let 提示内容 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, 值);
+                                    await 发消息(event, [段_艾特(event.user_id), 段_文本(` (${event.user_id})\n验证码错误！\n你的验证内容是:${提示内容}\n剩余验证次数:${可用次数 - 已用_次数}`)]);
                                     return null;
                                 }
                             }else{
                                 writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+                                writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
                                 writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "已通过");
                             }
                         }else{
                             writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+                            writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
                             writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "无");
                         }
                     }
@@ -2352,6 +3436,38 @@ if (
 ) {
   return null;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if(message.match(/([\s\S]*)/)){
+    // ================== c ==================
+    const 是自身消息 =
+        event.post_type === "message_sent" ||
+        String(event.self_id ?? "") === String(event.user_id ?? event.sender?.user_id ?? "");
+    if(!是自身消息 && RC_sq == "已授权" && isMessageRecordEnabled(event)){
+        mkEnqueueMessageRecord(ctx, event);
+    }
+}
+
 // ================== 群管部分 ==================
 if(message == "群管系统" || message == "群管功能" || message == "群管菜单"){
     // ================== 授权判断 ==================
@@ -2387,7 +3503,7 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息1_1 += `\n - 获取可群发列表`;
     组装消息1_1 += `\n - 查看可群发列表`;
     组装消息1_1 += `\n - 新增可群发目标[群号]`;
-    组装消息1_1 += `\n - 删除可群发目标[群号]`;
+    组装消息1_1 += `\n - 取消可群发目标[群号]`;
     组装消息1_1 += `\n`;
     组装消息1_1 += `\n执行发送的↓`;
     组装消息1_1 += `\n - 执行群发文本[内容][图片:选]`;
@@ -2423,7 +3539,7 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息2 += `\n - 清空审核过滤词`;
     组装消息2 += `\n - 查看审核过滤词`;
     组装消息2 += `\n══════════════`;
-    组装消息2 += `\n详细数据看「功能解析」这个功能没写`;
+    组装消息2 += `\n详细说明与演示对话见「MK介绍」`;
 
     let 组装消息2_2_受邀同意 = `══════════════`;
     组装消息2_2_受邀同意 += `\n【受邀同意】（全局事件）`;
@@ -2440,6 +3556,7 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息2_3 += `\n - 取消入群验证[QQ号]`;
     组装消息2_3 += `\n - 设置入群验证次数[数字]`;
     组装消息2_3 += `\n - 设置入群验证时长[时长:秒]`;
+    组装消息2_3 += `\n - 设置入群验证方式[随机数字|随机字母|随机算式]`;
     组装消息2_3 += `\n══════════════`;
 
     // 模块2.4 - 入群私聊
@@ -2470,6 +3587,10 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     let 组装消息4 = `══════════════`;
     组装消息4 += `\n【清理骨灰】`;
     组装消息4 += `\n - 获取骨灰群员列表`;
+    组装消息4 += `\n - 获取七日骨灰群员列表`;
+    组装消息4 += `\n - 获取半月骨灰群员列表`;
+    组装消息4 += `\n - 获取一月骨灰群员列表`;
+    组装消息4 += `\n - 设置骨灰获取标准[数值][天|月]`;
     组装消息4 += `\n - 查看骨灰群员列表`;
     组装消息4 += `\n - 取消骨灰群员QQ[QQ号]`;
     组装消息4 += `\n - 取消骨灰群员序号[序号]`;
@@ -2478,6 +3599,17 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息4 += `\n------------------`;
     组装消息4 += `\n - 提醒骨灰群员`;
     组装消息4 += `\n - 提醒骨灰群员[内容]`;
+    组装消息4 += `\n------------------`;
+    组装消息4 += `\n【筛选标准说明】`;
+    组装消息4 += `\n · 获取骨灰群员：按本群自定义标准筛选，初始为7天`;
+    组装消息4 += `\n · 获取七日骨灰群员：固定筛选7天及以上未发言成员`;
+    组装消息4 += `\n · 获取半月骨灰群员：固定筛选15天及以上未发言成员`;
+    组装消息4 += `\n · 获取一月骨灰群员：固定筛选30天及以上未发言成员`;
+    组装消息4 += `\n · 设置骨灰获取标准1天：带「天」按天×86400换算为秒存储`;
+    组装消息4 += `\n · 设置骨灰获取标准1月：带「月」按月×30×86400换算为秒存储`;
+    组装消息4 += `\n · 设置骨灰获取标准604800：不带单位则数值本身为秒`;
+    组装消息4 += `\n · 可设范围3600秒~365天，配置存于获取标准.json`;
+    组装消息4 += `\n · 获取结果仅显示筛选类型，具体天数以本群设置为准`;
     组装消息4 += `\n------------------`;
     组装消息4 += `\n【清理骨灰】- 使用说明`;
     组装消息4 += `\n1.先「获取骨灰群员」列表`;
@@ -2532,14 +3664,26 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息6_1 += `\n【禁发】`;
     组装消息6_1 += `\n相关事件【进阶检测】`;
     组装消息6_1 += `\n`;
-    组装消息6_1 += `\n[开启|关闭]禁发图片`;
-    组装消息6_1 += `\n[开启|关闭]禁发卡片`;
-    组装消息6_1 += `\n[开启|关闭]禁发语音`;
-    组装消息6_1 += `\n[开启|关闭]禁发视频`;
-    组装消息6_1 += `\n[开启|关闭]禁发合并转发`;
+    组装消息6_1 += `\n - [开启|关闭]禁发图片`;
+    组装消息6_1 += `\n - [开启|关闭]禁发卡片`;
+    组装消息6_1 += `\n - [开启|关闭]禁发语音`;
+    组装消息6_1 += `\n - [开启|关闭]禁发视频`;
+    组装消息6_1 += `\n - [开启|关闭]禁发合并转发`;
     组装消息6_1 += `\n`;
     组装消息6_1 += `\n注意:该功能与「违禁系统」共用同一个处理方式！`;
     组装消息6_1 += `\n══════════════`;
+    
+    let 组装消息6_2 = `══════════════`;
+    组装消息6_2 += `\n【限制文本发送】`;
+    组装消息6_2 += `\n相关事件【进阶检测】`;
+    组装消息6_2 += `\n - 发言限制 字数 [数字]`;
+    组装消息6_2 += `\n - 发言限制 行数 [数字]`;
+    组装消息6_2 += `\n - 发言限制 艾特 [数字]`;
+    组装消息6_2 += `\n - 发言限制 [数字] [数字] [数值]`;
+    组装消息6_2 += `\n - 查看发言限制`;
+    组装消息6_2 += `\n`;
+    组装消息6_2 += `\n注意：该配置需机器人有管理身份才可以执行，并且快捷设置时，参数分别是 字数 行数 艾特 先后顺序，每个指令均有空格，记得别忘了哦～`;
+    组装消息6_2 += `\n══════════════`;
 
     // 模块7 - 群聊发言统计
     let 组装消息7 = `══════════════`;
@@ -2549,6 +3693,7 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息7 += `\n↓查看排行列表的↓`;
     组装消息7 += `\n - 发言排行今日榜`;
     组装消息7 += `\n - 发言排行昨日榜`;
+    组装消息7 += `\n - 发言排行七日榜`;
     组装消息7 += `\n - 发言排行本月榜`;
     组装消息7 += `\n - 发言排行个人榜`;
     组装消息7 += `\n══════════════`;
@@ -2589,69 +3734,1573 @@ if(message == "群管系统" || message == "群管功能" || message == "群管�
     组装消息9 += `\n══════════════`;
     
     //目录
-    let 目录说明 = "【群管系列】- 共8个模块";
+    let 目录说明 = "【群管系列】- 共9个模块";
     目录说明 += "\n══════════════";
-    目录说明 += "\n001 │ 群管系统";
-    目录说明 += "\n002 │ 入群审核";
+    目录说明 += "\n001 │ 群管系统 + 群发公告";
+    目录说明 += "\n002 │ 入群审核 / 入群验证 / 入群私聊";
     目录说明 += "\n全局 │ 受邀同意";
-    目录说明 += "\n002 │ 入群验证";
     目录说明 += "\n003 │ 头衔系统";
     目录说明 += "\n004 │ 清理骨灰";
     目录说明 += "\n005 │ 黑名单系统";
-    目录说明 += "\n006 │ 违禁词系统";
+    目录说明 += "\n006 │ 违禁词 + 禁发 + 限制文本";
     目录说明 += "\n007 │ 发言统计";
     目录说明 += "\n008 │ 入群欢迎";
     目录说明 += "\n009 │ 马甲系统";
     目录说明 += "\n══════════════";
+    目录说明 += "\n指令速查发「群管菜单」；含演示对话的完整说明发「MK介绍」";
+    // NapCat 合并转发须能解析每个节点 uin（Get Uid），不可用随机/虚构 QQ
+    const mkForwardUin = Number(event.self_id);
     // ================== 构建嵌套转发消息 ==================
     const messages = [
-        合并节点("📋 群管功能目录", rand(1001,99999999), [段_文本(目录说明)], { time: 1609459200 }),
-        嵌套合并节点("🔧 基础群管", rand(1001,99999999), [
-            合并节点("内容一", rand(1001,99999999), [段_文本("001")]),
-            合并节点("群管系统", rand(1001,99999999), [段_文本(组装消息1)]),
-            合并节点("群发系统", rand(1001,99999999), [段_文本(组装消息1_1)]),
+        合并节点("📋 群管功能目录", mkForwardUin, [段_文本(目录说明)], { time: 1609459200 }),
+        嵌套合并节点("🔧 基础群管", mkForwardUin, [
+            合并节点("内容一", mkForwardUin, [段_文本("001")]),
+            合并节点("群管系统", mkForwardUin, [段_文本(组装消息1)]),
+            合并节点("群发系统", mkForwardUin, [段_文本(组装消息1_1)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("📝 入群审核", rand(1001,99999999), [
-            合并节点("内容二", rand(1001,99999999), [段_文本("002")]),
-            合并节点("入群审核", rand(1001,99999999), [段_文本(组装消息2)]),
-            合并节点("受邀同意", rand(1001,99999999), [段_文本(组装消息2_2_受邀同意)]),
-            合并节点("入群验证", rand(1001,99999999), [段_文本(组装消息2_3)]),
-            合并节点("入群私聊", rand(1001,99999999), [段_文本(组装消息2_4)]),
+        嵌套合并节点("📝 入群审核", mkForwardUin, [
+            合并节点("内容二", mkForwardUin, [段_文本("002")]),
+            合并节点("入群审核", mkForwardUin, [段_文本(组装消息2)]),
+            合并节点("受邀同意", mkForwardUin, [段_文本(组装消息2_2_受邀同意)]),
+            合并节点("入群验证", mkForwardUin, [段_文本(组装消息2_3)]),
+            合并节点("入群私聊", mkForwardUin, [段_文本(组装消息2_4)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("👑 头衔系统", rand(1001,99999999), [
-            合并节点("内容三", rand(1001,99999999), [段_文本("003")]),
-            合并节点("头衔系统", rand(1001,99999999), [段_文本(组装消息3)]),
+        嵌套合并节点("👑 头衔系统", mkForwardUin, [
+            合并节点("内容三", mkForwardUin, [段_文本("003")]),
+            合并节点("头衔系统", mkForwardUin, [段_文本(组装消息3)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("💀 清理骨灰", rand(1001,99999999), [
-            合并节点("内容四", rand(1001,99999999), [段_文本("004")]),
-            合并节点("清理骨灰", rand(1001,99999999), [段_文本(组装消息4)]),
+        嵌套合并节点("💀 清理骨灰", mkForwardUin, [
+            合并节点("内容四", mkForwardUin, [段_文本("004")]),
+            合并节点("清理骨灰", mkForwardUin, [段_文本(组装消息4)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("⚫ 黑名单系统", rand(1001,99999999), [
-            合并节点("内容五", rand(1001,99999999), [段_文本("005")]),
-            合并节点("黑名单系统", rand(1001,99999999), [段_文本(组装消息5)]),
+        嵌套合并节点("⚫ 黑名单系统", mkForwardUin, [
+            合并节点("内容五", mkForwardUin, [段_文本("005")]),
+            合并节点("黑名单系统", mkForwardUin, [段_文本(组装消息5)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("🚫 违禁词系统", rand(1001,99999999), [
-            合并节点("内容六", rand(1001,99999999), [段_文本("006")]),
-            合并节点("违禁词系统", rand(1001,99999999), [段_文本(组装消息6)]),
-            合并节点("禁发消息", rand(1001,99999999), [段_文本(组装消息6_1)]),
+        嵌套合并节点("🚫 违禁词系统", mkForwardUin, [
+            合并节点("内容六", mkForwardUin, [段_文本("006")]),
+            合并节点("违禁词系统", mkForwardUin, [段_文本(组装消息6)]),
+            合并节点("禁发消息", mkForwardUin, [段_文本(组装消息6_1)]),
+            合并节点("限制消息", mkForwardUin, [段_文本(组装消息6_2)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("📊 发言统计", rand(1001,99999999), [
-            合并节点("内容七", rand(1001,99999999), [段_文本("007")]),
-            合并节点("发言统计", rand(1001,99999999), [段_文本(组装消息7)]),
+        嵌套合并节点("📊 发言统计", mkForwardUin, [
+            合并节点("内容七", mkForwardUin, [段_文本("007")]),
+            合并节点("发言统计", mkForwardUin, [段_文本(组装消息7)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("🎉 入群欢迎", rand(1001,99999999), [
-            合并节点("内容八", rand(1001,99999999), [段_文本("008")]),
-            合并节点("入群欢迎", rand(1001,99999999), [段_文本(组装消息8)]),
+        嵌套合并节点("🎉 入群欢迎", mkForwardUin, [
+            合并节点("内容八", mkForwardUin, [段_文本("008")]),
+            合并节点("入群欢迎", mkForwardUin, [段_文本(组装消息8)]),
         ], { time: 1609459200 }),
-        嵌套合并节点("♻️ 马甲系统", rand(1001,99999999), [
-            合并节点("内容九", rand(1001,99999999), [段_文本("009")]),
-            合并节点("马甲系统", rand(1001,99999999), [段_文本(组装消息9)]),
+        嵌套合并节点("♻️ 马甲系统", mkForwardUin, [
+            合并节点("内容九", mkForwardUin, [段_文本("009")]),
+            合并节点("马甲系统", mkForwardUin, [段_文本(组装消息9)]),
         ], { time: 1609459200 }),
     ];
     // ================== 发送嵌套转发 ==================
-    await 发合并消息(event, messages);
+    await 发合并消息(event, messages, 合并预览(
+        "MKbot 群管功能目录",
+        "九大群管子模块指令与子菜单一览",
+        "[聊天记录]",
+        ["基础群管: 禁言/踢人/群发公告", "入群审核: 审核/验证/私聊/受邀", "头衔/骨灰/黑名单/违禁", "统计/欢迎/马甲: 见转发内嵌套卡片"],
+    ));
     return null;
 }
+
+if(message == "MK介绍"){
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 内容区 ==================
+    let 目录说明 = `感谢你能够有耐心阅读本插件的功能介绍\n在此之前，我认为有必要声明MK插件的原则:`;
+    目录说明 += `\n1.MK插件绝对免费、绝对开源，不会采取任何付费更新措施！`;
+    目录说明 += `\n2.MK开发者坚决不接定制插件！但如果在接技术范围之内可无偿帮忙`;
+    目录说明 += `\n3.我没有收取你们的任何东西，所以不要压力我！`;
+    目录说明 += `\n4.我们并不希望MK被使用在非法用途中`;
+    目录说明 += `\n══════════════`;
+    目录说明 += `\n【本介绍包含】授权系统 · 事件管理(27项) · 群管001~009 · 发卡系统(用户+管理)`;
+    目录说明 += `\n══════════════`;
+    目录说明 += `\n001 基础群管+群发公告（禁言/踢人/改群资料/跨群群发）`;
+    目录说明 += `\n002 入群审核+受邀同意+入群验证+入群私聊`;
+    目录说明 += `\n003 头衔系统（自助头衔/设置头衔/全员头衔）`;
+    目录说明 += `\n004 清理骨灰（获取/查看/取消/清理/提醒+筛选标准）`;
+    目录说明 += `\n005 黑名单系统（本群/全局名单与自动拦截）`;
+    目录说明 += `\n006 违禁词+禁发+限制文本（进阶检测）`;
+    目录说明 += `\n007 发言统计（今日/昨日/七日/本月/个人榜）`;
+    目录说明 += `\n008 入群欢迎（自定义欢迎词与变量）`;
+    目录说明 += `\n009 马甲系统（前缀马甲/全员马甲）`;
+    目录说明 += `\n══════════════`;
+    目录说明 += `\n【扩展·发卡系统】归笺兑换卡密商店（全服共享库存，分用户端/管理端两节）`;
+    目录说明 += `\n══════════════`;
+    目录说明 += `\n指令速查发「群管菜单」；下面各模块含真实指令演示对话`;
+    目录说明 += `\n📎 内容较多，将分【上下两篇】合并转发；下篇为扩展·发卡系统`;
+    //授权系统
+    let 授权介绍_1 = `【授权系统】MK 插件级本地授权（非 QQ 官方）
+数据存：筱筱吖/授权系统/授权信息/群号.json（私聊用 私聊.json）
+到期或未授权时，群功能会提示「MK没能量啦～要充电电～～」`;
+    let 授权介绍_2 = `发「授权系统」可查看完整指令菜单（合并转发 3 条）：
+【用户指令】授权判断 / 授权判断[群号] / 使用卡密[卡密]
+【后台指令】生成·添加·列表·删卡·取消授权（均需机器主人）`;
+    let 授权介绍_3b = `六种卡密时长（秒）：
+天86400 · 周604800 · 月2678400 · 半年15724800 · 年31622400 · 永久311040000
+公式：授权时间 + 卡密时长 = 到期；未过期再充值为「续期」，已过期为「重新添加授权」`;
+    let 授权介绍_4 = `授权系统`;//操作者
+    let 授权介绍_5 = `（机器人回复合并转发，节选）
+用户指令: 授权判断 / 使用卡密[卡密]
+后台指令: 生成/添加各档卡密、卡密列表、删除卡密、清空卡密、删除授权…
+后记: 纯本地文件；不需要可在 config 开「绕过授权」`;//机器人
+    let 授权介绍_6 = `【方式一·发卡密】机器人生成卡密 → 用户在目标群/私聊「使用卡密」充值`;
+    let 授权介绍_7 = `生成月卡授权`;//操作者（单次生成，>10张走私聊合并转发）
+    let 授权介绍_8 = `已发给你的私聊啦，请查收～`;//机器人（群聊提示）
+    let 授权介绍_9 = `已生成【1】张【月卡】
+【1】MK2989961782443452`;//机器人（私聊卡密内容）
+    let 授权介绍_10 = `批量例：生成月卡授权5（数量 1～100，否则「请正常给我参数哦～」）`;
+    let 授权介绍_11 = `使用卡密MK2989961782443452`;//操作者（在目标群）
+    let 授权介绍_12 = `══════════════
+[使用目标]:群聊(1082631686)
+[增加模式]:重新添加授权
+[卡密类型]:月卡
+[新增时长]:2678400秒
+[到期时间]:2026-07-27 11:17:15
+══════════════`;//机器人
+    let 授权介绍_13 = `无效卡密：「卡密无效！」；使用后卡密会从 卡密数据.json 删除（一次性）`;
+    let 授权介绍_14 = `【方式二·直接加授权】跳过卡密，主人直接在群里/私聊添加时长`;
+    let 授权介绍_15 = `添加天卡授权`;//操作者（当前群）
+    let 授权介绍_16 = `══════════════
+已重新添加授权
+[卡密类型]:天卡
+[新增时长]:86400秒
+[到期时间]:2026-06-27 11:19:49
+══════════════`;//机器人
+    let 授权介绍_17 = `未过期时再添加会显示「已续期卡密时长」，时长叠加而非清零重算
+跨群：添加月卡授权1082631686（私聊也可给指定群加）`;
+    let 授权介绍_18 = `【查询】授权判断 = 查当前群/私聊；授权判断1082631686 = 查指定群`;
+    let 授权介绍_19 = `授权判断`;//操作者
+    let 授权介绍_20 = `群聊(1082631686) - 授权数据
+══════════════
+[授权时间]:2026-06-26 11:19:49
+[剩余时长]:0天23时54分6秒
+[到期时间]:2026-06-27 11:19:49
+══════════════`;//机器人
+    let 授权介绍_21 = `【后台·卡密管理】卡密列表 → 私聊发统计+明细合并转发
+删除卡密MKxxxx → 「已删除卡密【xxx】」
+清空卡密 → 「已清空现在有的全部卡密啦～！」（菜单写「清空全部」，实际指令为清空卡密）`;
+    let 授权介绍_22 = `卡密列表`;//操作者
+    let 授权介绍_23 = `已发给你的私聊啦，请查收～`;//机器人
+    let 授权介绍_24 = `【后台·取消授权】删除授权 = 清当前群/私聊；删除授权1082631686 = 清指定群
+→「我这就去把【1082631686】的授权状态给bian了！」`;
+    let 授权介绍_25 = `小总结：
+· 出租/自用：生成卡密 → 客户群「使用卡密」
+· 自己群省事：直接「添加X卡授权」
+· 查余量：授权判断；管库存：卡密列表
+· 自用不想授权：config.json 开「绕过授权」即可～`;
+    //事件管理
+    let 事件介绍_1 = `【事件管理】是 MK 大部分自动化功能的「总开关」
+很多功能必须先在这里开启，对应的检测、统计、回复才会真正生效哦～`;
+    let 事件介绍_2 = `MK 的事件分为两类：
+「本群事件」只对当前群生效，写在「筱筱吖/事件系统/群号.json」
+「全局事件」对所有群生效，写在「筱筱吖/事件系统/全局.json」，并且只有机器主人才可以开关！`;
+    let 事件介绍_3 = `你可以先发【事件管理】查看全部事件名称、当前开关状态和简要说明
+注意：该指令只能在群聊里使用，并且会以「合并转发」的形式回复你`;
+    let 事件介绍_4 = `事件管理`;//操作者
+    let 事件介绍_24 = `（机器人回复合并转发，共27项；每项含名称、开关状态、说明）
+节选：
+【入群欢迎】: ❌关闭
+【违禁检测】: ❌关闭
+【发言统计】: ❌关闭
+全局【受邀同意】: ❌关闭
+全局【自动备份】: ❌关闭
+...（完整列表以群内实时查询为准）`;//机器人
+    let 事件介绍_5 = `共计【27】个事件（本群22项 + 全局5项）
+发「事件管理」可看每项实时开关与说明；下面按分类逐项介绍`;
+    let 事件介绍_19 = `【本群事件 1/3】存储：筱筱吖/事件系统/群号.json
+①禁言通知 — 有人禁言/解禁/全体禁言时群内自动通知
+②入群审核 — 加群申请自动审核，须配合审核指令（详见群管002）
+③邀人统计 — 记录本群拉人数量；查询发「邀人统计」
+④自助头衔 — 群员「我要头衔」自改头衔，须本事件开启（群管003）
+⑤伪造聊天 — 合并转发伪造聊天记录，指令后输入 JSON 数组
+⑥黑白名单 — 黑名单拦截的前置开关（详见群管005）`;
+    let 事件介绍_20 = `【本群事件 2/3】
+⑦退群拉黑 — 退群自动拉黑；不开退群通知也生效但不回复
+⑧退群通知 — 有人退群发通知（机器人踢的不通知）；可「设置退群通知词#模板」
+⑨整点报时 — 整点自动播报；「更改整点报时文案[内容]」仅本群生效
+⑩禁发红包 — 禁发全部类型红包，命中后仅撤回
+⑪入群欢迎 — 新人进群发送欢迎语（详见群管008）
+⑫违禁检测 — 违禁词自动撤回/禁言（详见群管006）
+⑬进阶检测 — 禁发类型+合并内违禁+发言限制（详见群管006）
+⑭发言统计 — 记录发言条数排行（详见群管007）`;
+    let 事件介绍_21 = `【本群事件 3/3】
+⑮群聊续火 — 定时文本续火，维持群活跃标识
+⑯视频解析 — 支持哔哩哔哩/抖音/小红书/快手链接解析
+⑰问答系统 — 精准/模糊问答；发「问答系统」看指令，仅主人可设词库
+⑱管理模式 — 开启后本群群主/管理员也可操作本群指令
+⑲入群验证 — 进群后验证码，默认随机数字（详见群管002）
+⑳马甲系统 — 群名片前缀格式化（详见群管009）
+㉑入群私聊 — 新人概率私聊已收录内容（详见群管002）
+㉒消息记录 — 自动记录本群消息；私聊记录另按好友单独开关`;
+    let 事件介绍_22 = `【全局事件】存储：筱筱吖/事件系统/全局.json（仅主人可开关）
+㉓全群打卡 — 每日00:00准时打卡（可能略有误差）
+㉔自动点赞 — 互点回赞；扩展支持定时给全部/特定好友点赞
+㉕好友续火 — 每日准时给好友发续火消息
+㉖自动备份 — 每天12时与00时自动备份，以好友文件发给开启者
+㉗受邀同意 — 被邀请进群时自动同意（仅 invite 请求）`;
+    let 事件介绍_6 = `看完列表后，切换开关就很简单啦～
+本群事件用「开启+事件名」或「关闭+事件名」即可
+例如：开启入群欢迎、关闭违禁检测`;
+    let 事件介绍_7 = `开启入群欢迎`;//操作者
+    let 事件介绍_8 = `这就把【入群欢迎】给开启！`;//机器人
+    let 事件介绍_9 = `如果本来就是开启状态，再发一次会怎样呢？`;
+    let 事件介绍_10 = `开启入群欢迎`;//操作者
+    let 事件介绍_11 = `这个事件好像已经开启了吧～？`;//机器人
+    let 事件介绍_12 = `全局事件比如「受邀同意」「自动备份」「全群打卡」等，必须机器主人才可操作
+普通群管就算开了管理模式也改不了全局事件哦～`;
+    let 事件介绍_13 = `开启受邀同意`;//操作者
+    let 事件介绍_14 = `这就把【受邀同意】给开启！`;//机器人
+    let 事件介绍_15 = `还有一种偷懒写法：一次性开关全部事件，同样需要主人权限`;
+    let 事件介绍_16 = `开启全部事件`;//操作者
+    let 事件介绍_17 = `已将以下事件统一「开启」\n══════════════\n【禁言通知】: ✅已开启！\n【入群审核】: ✅已开启！\n【入群欢迎】: ❌本就开启！\n...\n【受邀同意】: ✅已开启！\n══════════════\n（开启入群审核时，若机器人有群管权限，还会尝试同步 QQ 加群方式为问答审核）`;//机器人
+    let 事件介绍_18 = `小提示：开启「管理模式」后，本群管理员和群主也可以开关本群事件；但「开启全部事件」「关闭全部事件」以及任意全局事件，仍然只有主人能操作！`;
+    let 事件介绍_23 = `常见组合推荐：
+· 新群迎新 → 入群欢迎 + 入群审核 + 违禁检测
+· 严管群 → 黑白名单 + 进阶检测 + 管理模式
+· 活跃统计 → 发言统计 + 自助头衔 + 群聊续火
+· 自用维护 → 自动备份 + 受邀同意 + 好友续火
+单项指令细节见「群管菜单」或 MK介绍对应群管模块～`;
+    //群管系统_001
+    let 群管001_1 = `【群管系统·001】基础群管 + 扩展 + 群发公告
+对应群管菜单第一模块；下面按「该发什么 → 机器人真实回复 → 常见坑点」顺序演示`;
+    let 群管001_2 = `使用前必备（与代码 checkOwner3 一致）：
+① 本群须已授权，否则回复「MK没能量啦～要充电电～～」
+② 须机器主人；或开启「管理模式」后本群群主/管理员也可操作
+③ 禁言/踢出/改资料/群发：机器人须是本群管理员
+④ 上管/下管：机器人须是群主，且仅主人可发（不受管理模式加成）
+⑤ 带@人的指令必须艾特目标；没@或权限不够时多数静默不回复`;
+    let 群管001_3 = `══════════════
+【群管系统】
+ - 禁言@人 [时间:秒]
+ - 时/天/周/月禁言@人
+ - 解禁@人
+ - 上管@人 / 下管@人
+ - 踢出@人 / 黑踢@人
+ - 获取禁言列表 / 全解群员
+══════════════
+【扩展】更改群名称 / 更改群头像 / 发公告
+【群发公告】获取·查看·新增·取消目标 / 执行群发 / ☆艾特全体`;
+    let 群管001_4 = `先从禁言和解禁开始：秒数可省略，默认 60 秒；也可写具体秒数或用快捷单位`;
+    let 群管001_5 = `禁言@288888888`;//操作者
+    let 群管001_6 = `已对【1】人有效禁言啦～
+══════════════
+✅1.288888888:禁言60秒`;//机器人
+    let 群管001_7 = `自定义秒数示例：禁言@288888888 300 → 禁言300秒
+快捷单位：时=3600 · 天=86400 · 周=604800 · 月=2592000`;
+    let 群管001_8 = `天禁言@288888888`;//操作者
+    let 群管001_9 = `已对【1】人有效天禁言啦～
+══════════════
+✅1.288888888:禁言86400秒`;//机器人
+    let 群管001_10 = `解禁@288888888`;//操作者
+    let 群管001_11 = `已对【1】人有效解禁啦～
+══════════════
+✅1.288888888:解禁成功`;//机器人
+    let 群管001_12 = `上管/下管仅主人可发；机器人必须是群主，否则「窝没有群主权限唉～」
+已是管理/不是管理时会分别提示「已经是啦」「已就不是」并跳过`;
+    let 群管001_13 = `上管@288888888`;//操作者
+    let 群管001_14 = `已对【1】人有效上管啦～
+══════════════
+✅1.288888888:新上位`;//机器人
+    let 群管001_15 = `下管@288888888`;//操作者
+    let 群管001_16 = `已对【1】人有效下管啦～
+══════════════
+✅1.288888888:被下台了`;//机器人
+    let 群管001_17 = `踢出是普通踢，黑踢会勾选拒绝再次加群（QQ 黑名单拦截）`;
+    let 群管001_18 = `踢出@288888888`;//操作者
+    let 群管001_19 = `已对【1】人有效踢出啦～
+══════════════
+✅1.288888888:普通踢出`;//机器人
+    let 群管001_20 = `黑踢@288888888`;//操作者
+    let 群管001_21 = `已对【1】人有效黑踢啦～
+══════════════
+✅1.288888888:拉黑踢出`;//机器人
+    let 群管001_52 = `【场景·机器人无群管】禁言/踢出/解禁等若机器人不是管理员：
+「窝没有群管权限唉～」`;
+    let 群管001_53 = `【场景·目标权限过高】对方是群主或同级管理时，批量结果里会标：
+❌1.288888888:权限不足（不会强行操作）`;
+    let 群管001_54 = `【场景·批量@】一次艾特 ≥15 人时，禁言/解禁/踢出等明细走合并转发
+标题如「[禁言人数]」「[踢出人数]」，避免单条消息过长`;
+    let 群管001_22 = `想看当前还有谁被禁言，直接发「获取禁言列表」`;
+    let 群管001_23 = `获取禁言列表`;//操作者
+    let 群管001_24 = `共有【1】人处于禁言状态:
+══════════════
+1.288888888(示例昵称)
+[结束时间]:2026-06-27 12:00:00
+══════════════`;//机器人
+    let 群管001_25 = `想一次性解开全部能解的人，用「全解群员」`;
+    let 群管001_26 = `全解群员`;//操作者
+    let 群管001_27 = `全解群员执行完成
+══════════════
+[禁言总数] 1
+[解除成功] 1
+[权限跳过] 0
+[执行失败] 0
+══════════════
+✅1.288888888(示例昵称)：解除成功
+══════════════`;//机器人
+    let 群管001_55 = `禁言列表人数 ≥15 时同样会以合并转发输出（标题「[禁言列表]」）`;
+    let 群管001_28 = `扩展功能：改群资料 & 发本群公告（均需主人/群管 + 机器人有管理权限）`;
+    let 群管001_29 = `更改群名称筱筱の测试群`;//操作者
+    let 群管001_30 = `好哒！现在就把群名字改成↓
+筱筱の测试群`;//机器人
+    let 群管001_31 = `更改群头像`;//操作者（需携带图片）
+    let 群管001_32 = `我马上就去把群头像改成介个图片的！`;//机器人
+    let 群管001_33 = `发公告今晚八点群内活动，记得参加～`;//操作者
+    let 群管001_34 = `（发公告成功时通常不会有文字回复，公告会直接出现在本群公告栏）`;//旁白
+    let 群管001_35 = `「群发公告」子模块：先维护可群发列表，再批量发送
+「获取可群发列表」= 扫描并写入（带群名）；「查看可群发列表」= 只读当前已存列表
+目标群须已授权且机器人在该群有发言/公告权限，否则该群计入失败`;
+    let 群管001_36 = `获取可群发列表`;//操作者
+    let 群管001_37 = `共计可执行群聊为 2 个
+══════════════
+1.测试群A(1082631686)
+2.测试群B(1099887766)
+══════════════
+扩展指令:
+查看可群发列表
+取消可群发目标[群号]
+新增可群发目标[群号]
+执行群发文本[内容]
+执行群发公告[内容]
+☆执行群发(跟前两个一样)`;//机器人
+    let 群管001_38 = `查看可群发列表`;//操作者
+    let 群管001_39 = `══════════════
+共计已有 2 个群聊准备就绪
+══════════════
+1.1082631686
+2.1099887766
+══════════════
+扩展指令:
+获取可群发列表
+取消可群发目标[群号]
+新增可群发目标[群号]
+执行群发文本[内容]
+执行群发公告[内容]
+☆执行群发(跟前两个一样)`;//机器人
+    let 群管001_40 = `新增可群发目标1099887766`;//操作者
+    let 群管001_41 = `好哒好哒！这就把「1099887766」介个群给加到列表里面！`;//机器人
+    let 群管001_42 = `取消可群发目标1099887766`;//操作者
+    let 群管001_43 = `好哒！介就把「1099887766」介个群给去掉！`;//机器人
+    let 群管001_44 = `维护好列表后，就可以批量发消息或发群公告啦`;
+    let 群管001_45 = `执行群发文本大家好，MKbot 群发测试～`;//操作者
+    let 群管001_46 = `群发「文本」完成：成功 2/2`;//机器人
+    let 群管001_47 = `执行群发公告本群重要通知：请查看群公告`;//操作者
+    let 群管001_48 = `群发「公告」完成：成功 2/2`;//机器人
+    let 群管001_49 = `想在每个群发送完后艾特全体，在指令前加「☆」即可`;
+    let 群管001_50 = `☆执行群发文本更新完毕，请注意查看`;//操作者
+    let 群管001_51 = `群发「文本」完成：成功 2/2
+（各群发送成功后还会尝试艾特全体）`;//机器人
+    let 群管001_56 = `小总结：
+· 日常封禁 → 禁言@人 / 时天周月禁言@人 / 解禁@人
+· 人员管理 → 踢出@人 / 黑踢@人 / 上管@人 / 下管@人
+· 批量解封 → 获取禁言列表 → 全解群员
+· 跨群通知 → 维护可群发列表 → 执行群发文本/公告（☆=发送后艾特全体）
+· 机器人权限是 QQ 接口硬性要求，不是 MK 故意刁难～`;
+    //群管系统_002
+    const mkDemoNewbieQq = 288888888;
+    const mkDemoNewbieAvatar = `https://q4.qlogo.cn/g?b=qq&nk=${mkDemoNewbieQq}&s=5`;
+    let 群管002_1 = `【群管系统·002】入群审核 · 受邀同意 · 入群验证 · 入群私聊
+对应群管菜单第二模块；四个子功能彼此独立，可按需组合开启`;
+    let 群管002_2 = `指令一览（配置类需主人/群管 + 本群已授权）：
+【入群审核】设置入群审核条件[准确|包含|模糊多重|准确多重|字数]
+  设置入群审核答案 / 单日次数 / 字数数量
+  新增·删除·清空 审核条件 / 审核过滤词 · 查看列表
+【受邀同意】开启受邀同意（全局事件，仅主人）
+【入群验证】取消入群验证[QQ] / 设置次数 / 设置时长 / 设置方式[随机数字|随机字母|随机算式]
+【入群私聊】开始·结束记录 / 查看记录 / 设置概率（须在机器人私聊发送，不支持管理模式）`;
+    let 群管002_3 = `先从「入群审核」开始：处理加群申请，需先在事件管理开启「入群审核」
+数据目录：筱筱吖/群管系统/入群审核/群号/（数据.json · 条件库.json · 过滤库.json · 申请次数/）`;
+    let 群管002_4 = `开启入群审核`;//操作者
+    let 群管002_5 = `这就把【入群审核】给开启！
+已同步本群 QQ 加群方式：需身份验证 + 回答问题并由管理员审核`;//机器人
+    let 群管002_6 = `配置示例：准确模式 + 标准答案 + 每日申请次数 + 多重条件 + 过滤词`;
+    let 群管002_7 = `设置入群审核条件准确`;//操作者
+    let 群管002_8 = `已把本群的入群审核【条件】设置为「准确」模式
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_9 = `设置入群审核答案我已阅读群规并遵守`;//操作者
+    let 群管002_10 = `已把本群的入群审核【答案】设置为我已阅读群规并遵守
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_11 = `设置入群审核单日次数3`;//操作者
+    let 群管002_12 = `已把本群的入群审核【每日次数】设置为3次
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_13 = `设置入群审核条件字数`;//操作者
+    let 群管002_14 = `已把本群的入群审核【条件】设置为「字数」模式
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_15 = `设置入群审核字数数量10`;//操作者
+    let 群管002_16 = `已把本群的入群审核【字数审核】设置为10字
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_72 = `五种审核模式区别：
+· 准确 — 答案须与「设置入群审核答案」完全一致
+· 包含 — 答案须包含所设标准答案（子串匹配）
+· 字数 — 只看字数 ≥「设置入群审核字数数量」，不看具体内容
+· 模糊多重 — 答案包含条件库任一条即通过
+· 准确多重 — 答案与条件库任一条完全一致即通过`;
+    let 群管002_73 = `设置入群审核条件包含`;//操作者
+    let 群管002_74 = `已把本群的入群审核【条件】设置为「包含」模式
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_75 = `设置入群审核条件模糊多重`;//操作者
+    let 群管002_76 = `已把本群的入群审核【条件】设置为「模糊多重」模式
+══════════════
+记得本账号要有管理权限并且群聊是要为「发送验证消息」才生效哦～`;//机器人
+    let 群管002_17 = `新增审核条件同意入群`;//操作者
+    let 群管002_18 = `我这就去更新审核条件
+【新增】: 同意入群`;//机器人
+    let 群管002_19 = `新增审核过滤词广告`;//操作者
+    let 群管002_20 = `我这就去更新审核过滤词
+【新增】: 广告`;//机器人
+    let 群管002_21 = `查看多重条件列表`;//操作者
+    let 群管002_22 = `本群共有【1】个多重条件
+══════════════
+【1】同意入群`;//机器人
+    let 群管002_23 = `查看审核过滤词`;//操作者
+    let 群管002_24 = `本群共有【1】个审核过滤词
+══════════════
+【1】广告`;//机器人
+    let 群管002_25 = `当有人申请加群时，MK 自动比对验证答案（QQ 加群方式须为「发送验证消息」）
+过滤词优先级最高：答案含过滤词直接拒，不管其他条件是否满足`;
+    let 群管002_77 = `【场景·无附加验证】若申请无验证附言（comment 为空）或非 add 类型，会直接同意并在群内通知：
+QQ(xxx)通过入群审核，已同意进入～`;
+    let 群管002_78 = `【场景·字数不足】字数模式下未达设定字数，QQ 侧可见：
+「本群设定通过内容为:>=10个字」`;
+    let 群管002_26 = `【场景·审核通过】假设 QQ(${mkDemoNewbieQq}) 申请加群，答案填写「我已阅读群规并遵守」`;
+    let 群管002_27 = `QQ(${mkDemoNewbieQq})通过入群审核，已同意进入～`;//机器人
+    let 群管002_28 = `【场景·审核失败】若答案不准确，申请会被拒绝，QQ 侧可见理由如：
+「你的回答不符合本群设定！2」`;
+    let 群管002_29 = `【场景·过滤拦截】若答案包含过滤词「广告」，会直接拒绝：
+「你的回答不符合本群设定！3」`;
+    let 群管002_30 = `【场景·次数用尽】同一用户当天超过「单日次数」后再申请：
+「你今天的可用申请次数已用完咯～」`;
+    let 群管002_31 = `删除审核条件同意入群`;//操作者
+    let 群管002_32 = `我这就去更新审核条件
+【删除】: 同意入群`;//机器人
+    let 群管002_33 = `清空审核过滤词`;//操作者
+    let 群管002_34 = `耗的，这就就把审核过滤词通通删除！`;//机器人
+    let 群管002_79 = `清空审核条件`;//操作者
+    let 群管002_80 = `耗的，这就就把审核条件通通删除！`;//机器人
+    let 群管002_81 = `删除审核过滤词广告`;//操作者
+    let 群管002_82 = `我这就去更新审核过滤词
+【删除】: 广告`;//机器人
+    let 群管002_83 = `关闭「入群审核」事件后，加群申请不再经 MK 处理（代码直接 return null）`;
+    let 群管002_35 = `接下来是「受邀同意」：全局事件，主人用「开启受邀同意」打开`;
+    let 群管002_36 = `开启受邀同意`;//操作者
+    let 群管002_37 = `这就把【受邀同意】给开启！`;//机器人
+    let 群管002_38 = `开启后：任意群内有人邀请机器人进群（invite 请求）时，会自动在后台同意
+不校验目标群授权，也不受 group_of 限制；通常不会有群内文字回复`;
+    let 群管002_39 = `「入群验证」发生在新人已成功进群之后，需开启事件「入群验证」`;
+    let 群管002_40 = `开启入群验证`;//操作者
+    let 群管002_41 = `这就把【入群验证】给开启！`;//机器人
+    let 群管002_42 = `设置入群验证次数5`;//操作者
+    let 群管002_43 = `好哒！这就把入群验证的【次数】参数改成「5」`;//机器人
+    let 群管002_44 = `设置入群验证时长300`;//操作者
+    let 群管002_45 = `好哒！这就把入群验证的【时长】参数改成「300」`;//机器人
+    let 群管002_46 = `【场景·新人进群】QQ(${mkDemoNewbieQq}) 主动进群（非管理/群主邀请），触发数字验证`;
+    let 群管002_47 = ` (${mkDemoNewbieQq})
+请在5分钟内发送一下内容进行验证是否活人！
+------------------
+[验证内容]:8364
+[可以机会]:5次
+------------------
+[现在时间]:2026-06-26 12:00:00
+[截止时间]:2026-06-26 12:05:00`;//机器人（含头像）
+    let 群管002_48 = `新人需在时限内发送验证码；管理员/群主邀请进群的人可免验证`;
+    let 群管002_49 = `5827`;//新人·输错验证码
+    let 群管002_50 = `@${mkDemoNewbieQq} (${mkDemoNewbieQq})
+验证码错误！
+你的验证码是:8364
+剩余验证次数:4`;//机器人
+    let 群管002_51 = `8364`;//新人·验证正确
+    let 群管002_52 = `验证通过后状态变为「已通过」，新人可正常发言；输错时错误消息会被撤回`;
+    let 群管002_53 = `【场景·验证失败】若用完次数仍未通过，机器人会通报并踢出：
+【通报】
+[用户]:${mkDemoNewbieQq}
+在规定次数内未成功验证，已处理！`;//机器人
+    let 群管002_54 = `【场景·超时未验】超过「设置入群验证时长」仍未通过，同样会通报并处理`;
+    let 群管002_55 = `取消入群验证${mkDemoNewbieQq}`;//操作者
+    let 群管002_56 = `好哒！这就给「${mkDemoNewbieQq}」取消本次验证！`;//机器人
+    let 群管002_57 = `最后是「入群私聊」：配置指令必须在机器人私聊发送（群聊发无效），且「不支持」管理模式
+新人进群后按概率私聊发送已收录内容；须先开启事件「入群私聊」`;
+    let 群管002_58 = `开始记录1082631686`;//操作者·私聊
+    let 群管002_59 = `已开启收录，请在300秒内发送内容进行收录！当前收录群号为「1082631686」`;//机器人
+    let 群管002_60 = `欢迎加入本群！请先阅读群规～`;//操作者·私聊·收录内容
+    let 群管002_61 = `记录成功！`;//机器人
+    let 群管002_62 = `结束记录`;//操作者·私聊
+    let 群管002_63 = `已结束本次收录！`;//机器人
+    let 群管002_64 = `查看记录内容1082631686`;//操作者·私聊
+    let 群管002_65 = `（机器人将按收录顺序，逐条回放私聊内容）`;//旁白
+    let 群管002_66 = `设置入群私聊概率1082631686 80%`;//操作者·私聊
+    let 群管002_67 = `入群私聊概率已更新
+══════════════
+群号：1082631686
+概率：80%
+存储值：0.8`;//机器人
+    let 群管002_68 = `开启入群私聊`;//操作者·群聊
+    let 群管002_69 = `这就把【入群私聊】给开启！`;//机器人
+    let 群管002_70 = `【场景·新人进群】QQ(${mkDemoNewbieQq}) 进群且概率命中时，机器人会私聊发送已收录内容`;
+    let 群管002_71 = `欢迎加入本群！请先阅读群规～`;//机器人·私聊发给新人
+    let 群管002_84 = `小总结：
+· 加群把关 → 开「入群审核」→ 设模式/答案/次数/条件库/过滤词 → 等申请自动处理
+· 防广告号 → 入群验证（进群后验证码）与入群审核可叠加使用
+· 拉 bot 进群 → 开「受邀同意」（全局，仅 invite 请求）
+· 迎新私聊 → 私聊「开始记录」收录 → 设概率 → 开「入群私聊」
+· 过滤词 > 其他检测；重复设同一条件模式会提示「目前本群设置的条件是一样的啦～！」`;
+    //群管系统_003
+    let 群管003_1 = `【群管系统·003】头衔系统
+这一模块改的是 QQ 群「专属头衔」（special_title），就是显示在群名片昵称旁边的那一小段字，不是改群昵称，也不是改 QQ 昵称哦～`;
+    let 群管003_2 = `菜单里分成两块：
+①【头衔系统·自助】—— 群成员自己改自己的，需开事件「自助头衔」
+②【头衔系统·指令】—— 管理批量改别人的，需主人/群管权限
+══════════════
+ - 我要头衔[内容]
+ - 设置头衔@人 [内容]
+ - 全员头衔[内容]（也支持「全体头衔」，效果一样）`;
+    let 群管003_3 = `先说「自助头衔」：
+它的设计思路是：让普通群友也能自定义头衔，但 MK 不会无条件响应——必须同时满足下面几个条件才会执行`;
+    let 群管003_4 = `条件清单：
+① 本群已在「事件管理」里开启【自助头衔】
+② 本群已通过 MK 授权（未授权整个插件都不工作）
+③ 机器人账号在本群有管理员/群主权限（否则改不了别人的专属头衔）
+④ 发送者在群内发：我要头衔+想要的内容`;
+    let 群管003_5 = `开启自助头衔`;//操作者
+    let 群管003_6 = `这就把【自助头衔】给开启！`;//机器人
+    let 群管003_7 = `条件都满足后，群友发送「我要头衔萌新一枚」，MK 会调用 set_group_special_title 接口写入
+注意：成功时通常【不会有文字回复】，你需要看群名片上头衔有没有变`;
+    let 群管003_8 = `【场景·事件未开】如果忘了开「自助头衔」，群友发我要头衔时 MK 会直接忽略（静默，不报错）
+所以自助没反应时，先检查事件管理里开关是不是关着的`;
+    let 群管003_9 = `我要头衔萌新一枚`;//群员演示
+    let 群管003_10 = `（成功时无文字回复，头衔已写入群名片）`;//解说
+    let 群管003_11 = `【场景·机器人无权限】若机器人不是本群管理，会明确提示：`;
+    let 群管003_12 = `窝好像没有权限给你头衔哎～～`;//机器人
+    let 群管003_13 = `【场景·接口异常】若 QQ 侧拒绝（头衔过长、含违禁字符、频率限制等），会返回：`;
+    let 群管003_14 = `设置头衔失败：special_title invalid`;//机器人
+    let 群管003_15 = `再说管理指令「设置头衔」：
+用于群主/主人给指定成员改头衔，和自助不同，它必须【艾特目标】，且需要 checkOwner3 权限（主人，或开启管理模式后的群管/群主）`;
+    let 群管003_16 = `设置头衔@288888888 群管大佬`;//操作者
+    let 群管003_17 = `已把下面届些仁的头衔都改成一样的啦！
+══════════════
+1.【288888888】`;//机器人
+    let 群管003_18 = `可以同时 @ 多个人，内容写在指令后面，所有人会被设成相同头衔
+被 @ 超过 15 人时，结果会以「合并转发」输出，避免一条消息太长`;
+    let 群管003_19 = `设置头衔群管大佬`;//操作者·未艾特
+    let 群管003_20 = `介个功能需要艾特才能执行哦`;//机器人
+    let 群管003_21 = `若机器人本身没有群管权限，同样会提示「窝好像没有权限设置头衔哎～～」`;
+    let 群管003_22 = `最后是「全员头衔」（2.0.3 起支持，菜单也写作全体头衔）：
+一次性遍历本群成员列表，给所有真人批量设置相同头衔；适合活动统一标识、整群改名场面`;
+    let 群管003_23 = `执行逻辑要点：
+① 需要主人/群管权限 + 机器人有群管权限
+② 会自动拉取 get_group_member_list
+③ 官方机器人账号（is_robot=true）会跳过，并在结果里标 ❌
+④ 真人成功标 ✅，每处理一个调用一次 set_group_special_title
+⑤ 群人数 ≥15 时结果走合并转发`;
+    let 群管003_24 = `全员头衔吃瓜群众`;//操作者
+    let 群管003_25 = `已对【2】位群友进行头衔更改～
+══════════════
+✅1.筱筱(288888888)
+✅2.路人甲(277777777)
+❌3.腾讯管家(2854196310)`;//机器人
+    let 群管003_26 = `小总结：
+· 想让大家自己玩 → 开「自助头衔」+ 教群友发「我要头衔xxx」
+· 想精准改几个人 → 「设置头衔@人 内容」
+· 想全群统一 → 「全员头衔内容」
+· 三种方式都依赖机器人有管理权限，这是 QQ 接口硬性要求，不是 MK 故意刁难～`;
+    //群管系统_004
+    let 群管004_1 = `【群管系统·004】清理骨灰
+「骨灰」= 长期不发言的群成员。MK 会扫描全群 last_sent_time，按未发言时长筛出目标成员，供你核对后再踢`;
+    let 群管004_2 = `本模块全部指令（需主人/群管权限 + 本群已授权）：
+ - 获取骨灰群员列表（默认标准，初始7天，可用「设置骨灰获取标准」修改）
+ - 获取七日骨灰群员列表（固定7天）/ 获取半月骨灰群员列表（固定15天）/ 获取一月骨灰群员列表（固定30天）
+ - 设置骨灰获取标准[数值][天|月]（天×86400、月×30×86400；不带单位则为秒，范围3600秒~365天）
+ - 查看骨灰群员列表
+ - 取消骨灰群员QQ[QQ号]
+ - 取消骨灰群员序号[序号] / [序号]-[序号]
+ - 确定清理全部骨灰群员
+ - 提醒骨灰群员 / 提醒骨灰群员[内容]`;
+    let 群管004_3 = `推荐标准流程（菜单里也写了）：
+① 获取骨灰群员 → ② 查看列表确认 → ③ 有误则取消部分 → ④ 确定清理全部骨灰群员
+⑤ 想先温和提醒可发「提醒骨灰群员」，通过群来源临时会话私聊`;
+    let 群管004_4 = `重要：「获取」会先清空旧列表再重新扫描；「查看」只读当前缓存，不会重新拉群
+数据保存在：筱筱吖/群管系统/清理骨灰/群号/目前数据.json
+默认标准保存在：筱筱吖/群管系统/清理骨灰/群号/获取标准.json（字段「秒数」，默认604800）`;
+    let 群管004_5 = `第一步：获取符合条件的长期潜水成员`;
+    let 群管004_6 = `获取骨灰群员列表`;//操作者
+    let 群管004_7 = `筛选标准：默认
+共计有【2】位高冷人士
+══════════════
+1.潜水王(288888888)(12天)
+2.路人甲(277777777)(9天)
+══════════════`;//机器人
+    let 群管004_8 = `筛选标准说明：
+ · 获取骨灰群员走本群自定义标准，初始7天
+ · 获取七日/半月/一月为固定档位，不受自定义标准影响
+ · 设置骨灰获取标准14天 / 2月 / 604800秒均可（范围3600秒~365天）
+若全群没有符合当前筛选标准的人，会回复「好像没获取到哎～」
+若 ≥15 人，结果会以合并转发输出（标题「你这群这么多啊」）`;
+    let 群管004_9 = `第二步：再次查看列表（附带后续可用指令提示）`;
+    let 群管004_10 = `查看骨灰群员列表`;//操作者
+    let 群管004_11 = `共计有【2】位高冷人士
+----------------------
+可用指令:
+ - 取消骨灰群员QQ[QQ号]
+ - 取消骨灰群员序号[序号]
+ - 取消骨灰群员序号[序号]-[序号]
+ - 确定清理全部骨灰群员
+ - 提醒骨灰群员
+ - 提醒骨灰群员[内容]
+══════════════
+1.潜水王(288888888)(12天)
+2.路人甲(277777777)(9天)
+══════════════`;//机器人
+    let 群管004_12 = `若还没获取过就查看，会提示：
+「木有数据哎～！你先去「获取骨灰群员」八～！」`;
+    let 群管004_13 = `第三步（可选）：从待清理列表里排除误伤的人
+支持按 QQ 精确删除，或按序号/序号区间批量删除`;
+    let 群管004_14 = `取消骨灰群员QQ277777777`;//操作者
+    let 群管004_15 = `这就把【277777777】给取消啦！你再看看列表吧！`;//机器人
+    let 群管004_16 = `「取消骨灰群员序号1-2」也可一次删一段序号（演示略，逻辑同单条删除）`;
+    let 群管004_17 = `第四步：确认无误后执行踢出
+会跳过身份 ≥ 机器人的成员（群主/同级管理踢不掉），只踢权限允许的`;
+    let 群管004_18 = `确定清理全部骨灰群员`;//操作者
+    let 群管004_19 = `共有效清理【1】位骨灰
+══════════════
+1.【288888888】✅
+══════════════`;//机器人
+    let 群管004_20 = `【场景·机器人无权限】若机器人不是群管：
+「窝好像没有权限清理吧？～～」`;
+    let 群管004_21 = `【场景·全员权限不足】若列表里每个人都踢不了：
+「可能是权限不足，导致列表页面我一个人都清不了！」
+执行成功后列表文件会被清空，需要重新「获取」`;
+    let 群管004_22 = `第五步（可选）：「提醒骨灰群员」（2.2.8 新增）
+不踢人，改为通过【群来源临时会话】私聊提醒活跃；自定义文案用：
+提醒骨灰群员你好呀，好久不见～ 或 提醒骨灰群员(内容)`;
+    let 群管004_23 = `提醒前条件：
+① 已有获取到的骨灰列表
+② 群设置允许「群内发起临时会话」
+③ 自动跳过群主、管理员、机器人`;
+    let 群管004_24 = `提醒骨灰群员`;//操作者
+    let 群管004_25 = `开始提醒骨灰群员啦～
+总列表:1 人
+可提醒:1 人
+预计额外等待:0 秒（列表≤20，不启用延迟）`;//机器人
+    let 群管004_26 = `（随后机器人私聊目标：默认文案为「喂喂喂，你还在嘛？群聊:1082631686 提醒你要活跃一下咯~」）`;//解说
+    let 群管004_27 = `提醒结束后输出总结，含成功/失败/跳过明细；列表 >10 人时总结走合并转发
+列表 >20 人时，每成功提醒 10 人额外延迟 2 秒防风控`;
+    let 群管004_28 = `骨灰提醒执行完成
+══════════════
+[总列表] 1
+[可提醒] 1
+[成功] 1
+[失败] 0
+══════════════
+【发送明细】
+1.【288888888】✅
+══════════════`;//机器人
+    let 群管004_29 = `小总结：
+· 想清潜水 → 获取 → 查看 → 确定清理
+· 想给机会 → 先提醒骨灰群员，再观察一段时间
+· 踢人/提醒都需要机器人有足够权限，且操作不可逆，建议先看列表再动手～`;
+    //群管系统_005
+    let 群管005_1 = `【群管系统·005】黑名单系统（2.0.6-alpha.1 新增）
+维护「不想让其留在群里 / 禁止再次入群」的人员名单，分【本群】与【全局】两套数据`;
+    let 群管005_2 = `本模块全部指令（增删改需主人/群管；全局操作需机器主人）：
+↓查看↓ 黑名单列表 / 全局黑名单列表 / 本群黑名单列表 / 查黑名单[QQ]
+↓增删↓ 添加本群黑名单@人 / 添加全局黑名单[QQ] / 删除本群黑名单[QQ] / 清空黑名单 / 清空全局黑名单
+↓设置↓ 设置本群黑名单处理[踢出|黑踢] / 设置全局黑名单处理[踢出|黑踢]`;
+    let 群管005_3 = `前置条件：事件【黑白名单】必须开启，否则添加/删除/清空指令会被静默忽略（无回复）
+列表查看不受此限；自动拦截（发言/进群/加群申请）也依赖该事件`;
+    let 群管005_4 = `开启黑白名单`;//操作者
+    let 群管005_5 = `这就把【黑白名单】给开启！`;//机器人
+    let 群管005_6 = `数据存储：
+· 全局 → 筱筱吖/群管系统/黑白名单/全局/人员.json
+· 本群 → 筱筱吖/群管系统/黑白名单/群聊/群号/人员.json
+处理方式（踢出/黑踢）各存一份 处理方式.json`;
+    let 群管005_7 = `「踢出」= 普通移出群聊；「黑踢」= 踢出并勾选拒绝再次加群（QQ 自带拦截）
+默认均为【踢出】，可按本群/全局分别设置`;
+    let 群管005_8 = `先看本群名单（「黑名单列表」与「本群黑名单列表」等价，省略前缀时默认本群）`;
+    let 群管005_9 = `本群黑名单列表`;//操作者
+    let 群管005_10 = `当前选择【本群】黑名单
+共计人数【1】
+══════════════
+1.【288888888】
+══════════════`;//机器人
+    let 群管005_11 = `若名单为空，会回复：
+「我好像没找到「本群」黑名单的人唉～？是不是没有啊～」
+≥15 人时走合并转发（标题「黑名单列表」）`;
+    let 群管005_12 = `跨群封禁用全局名单；仅本群生效则用本群名单
+查看全局：发「全局黑名单列表」`;
+    let 群管005_13 = `查黑名单可一次看某 QQ 在全局/本群是否上榜（需群管权限）`;
+    let 群管005_14 = `查黑名单288888888`;//操作者
+    let 群管005_15 = `黑名单 查询结果:
+══════════════
+查询目标：288888888
+[全局黑名单]：false
+[本群黑名单]：true
+══════════════`;//机器人
+    let 群管005_16 = `添加方式一：@ 目标（适合本群在场成员）
+添加时会立刻按当前处理方式踢出，并写入名单`;
+    let 群管005_17 = `已把下列人员添加至【本群】黑名单列表
+══════════════
+1.【288888888】✅新增
+══════════════`;//机器人（@添加后）
+    let 群管005_18 = `添加方式二：直接写 QQ 号（全局/本群均可）
+例：添加全局黑名单277777777 — 需机器主人权限`;
+    let 群管005_19 = `添加全局黑名单277777777`;//操作者
+    let 群管005_20 = `✅已将【277777777】纳入「全局」黑名单列表！`;//机器人
+    let 群管005_21 = `若已在名单中重复添加，会提示：
+「❌【288888888】已存在于「本群」黑名单啦～」`;
+    let 群管005_22 = `删除本群黑名单288888888`;//操作者
+    let 群管005_23 = `✅好的，这就把【288888888】从「本群」黑名单移出！`;//机器人
+    let 群管005_24 = `若本来就不在名单里：
+「❌【288888888】本来就不在「本群」黑名单里面啦～！」
+清空：「清空黑名单」清本群，「清空全局黑名单」清全局 → 「好叭～这就把「xxx」黑名单给清空～～」`;
+    let 群管005_25 = `设置处理方式示例（本群改为黑踢）`;
+    let 群管005_26 = `设置本群黑名单处理黑踢`;//操作者
+    let 群管005_27 = `好哒！这就把「本群」黑名单的处理方式变为【黑踢】！`;//机器人
+    let 群管005_28 = `若已是目标方式，会提示：
+「目前的「本群」黑名单处理方式已经是【黑踢】啦！」`;
+    let 群管005_29 = `【自动拦截·发言】事件开启后，黑名单成员在群内发言 → 机器人权限足够则踢出（按处理方式）并撤回该消息`;
+    let 群管005_30 = `【自动拦截·已入群】黑名单成员已在群内（如刚被添加后未踢成功）→ 入群通知流程中再次踢出`;
+    let 群管005_31 = `【自动拦截·加群申请】黑名单用户申请加群 → 直接拒绝，理由「你是黑名单用户！」
+（与入群审核可叠加，黑名单优先）`;
+    let 群管005_32 = `小总结：
+· 本群封禁 vs 全局封禁，按场景选 scope
+· 先开事件「黑白名单」，再维护名单
+· 黑踢比踢出更狠，适合彻底拒之门外的账号
+· 机器人需有管理权限且身份高于目标，否则只能存名单无法执行踢出～`;
+    //群管系统_006
+    let 群管006_1 = `【群管系统·006】违禁词系统（2.0.8-alpha.1 新增核心 · 含禁发/发言限制）
+维护本群敏感词库，命中后按配置【撤回 / 禁言 / 撤回禁言】处理；进阶能力需事件「进阶检测」`;
+    let 群管006_2 = `【违禁词】相关事件「违禁检测」
+ - 违禁词列表 / 添加违禁词[内容] / 删除违禁词[内容] / 清空违禁词
+ - 设置违禁处理禁言|撤回|撤回禁言 / 设置违禁处理禁言时长[秒数]`;
+    let 群管006_3 = `【禁发】相关事件「进阶检测」（与违禁词共用处理方式）
+ - 开启|关闭禁发图片/视频/语音/卡片/合并转发`;
+    let 群管006_4 = `【限制文本发送】同样依赖「进阶检测」
+ - 发言限制 字数/行数/艾特 [数字] 或 发言限制 [字数] [行数] [艾特]
+ - 查看发言限制（0 = 不限制该项）`;
+    let 群管006_5 = `第一步：开启事件「违禁检测」，否则词库配置后也不会自动拦截发言`;
+    let 群管006_6 = `开启违禁检测`;//操作者
+    let 群管006_7 = `这就把【违禁检测】给开启！`;//机器人
+    let 群管006_8 = `数据路径：
+· 词库 → 筱筱吖/群管系统/违禁系统/群号/违禁词.json
+· 处理 → 同目录 处理.json（方式默认「撤回」，禁言时长默认 600 秒）
+匹配方式：消息全文 includes 词库条目（子串命中即触发）`;
+    let 群管006_9 = `添加违禁词（支持 添加/新增/增加 同义）`;
+    let 群管006_10 = `添加违禁词广告`;//操作者
+    let 群管006_11 = `我这就去添加违禁词！
+【新增】: 广告`;//机器人
+    let 群管006_12 = `重复添加会提示：「emmmm，介个违禁词好像也就有了哎～」
+删除/取消/减少违禁词[内容]、清空违禁词 同理维护词库`;
+    let 群管006_13 = `违禁词列表`;//操作者
+    let 群管006_14 = `共计【2】个违禁词
+当前处理方式 :【撤回】
+当前禁言时长 :【600秒】
+══════════════
+【1】: 广告
+【2】: 抽奖
+══════════════`;//机器人
+    let 群管006_15 = `词库为空时：「介个群好像木有添加违禁词哎」
+≥10 个词走合并转发（标题「违禁词列表」）`;
+    let 群管006_16 = `删除违禁词广告`;//操作者
+    let 群管006_17 = `我这就去把介个违禁词给ban了！
+【删除】: 广告`;//机器人
+    let 群管006_18 = `第二步：设定命中后的处置方式`;
+    let 群管006_19 = `设置违禁处理撤回禁言`;//操作者
+    let 群管006_20 = `好哒～！这就把违禁词的处理方式改成【撤回禁言】
+下一次即可触发了哦～`;//机器人
+    let 群管006_21 = `若已是当前方式：「现在已经是【撤回禁言】的处理方式啦！补药再改啦！」
+单独改禁言秒数：设置违禁处理禁言时长1200 → 「好哒！这就把违禁词的禁言时长改成【1200】秒！」`;
+    let 群管006_22 = `【自动拦截·违禁词】事件开启后，普通文本消息命中词库 → 静默执行（无机器人回复）
+机器人需群管且身份高于发言者；默认撤回，禁言/撤回禁言按 处理.json 执行`;
+    let 群管006_23 = `第三步（可选）：「进阶检测」——禁发 + 合并转发内违禁词 + 发言限制`;
+    let 群管006_24 = `开启进阶检测`;//操作者
+    let 群管006_25 = `这就把【进阶检测】给开启！`;//机器人
+    let 群管006_26 = `禁发与违禁词共用同一套处理方式（撤回/禁言/撤回禁言）
+例：禁止群友发图片`;
+    let 群管006_27 = `开启禁发图片`;//操作者
+    let 群管006_28 = `好哒！本群【禁发图片】已开启～`;//机器人
+    let 群管006_29 = `已开启的禁发类型命中后，同样按违禁处理方式执行；已是目标状态会提示「【禁发图片】已经是开启状态啦～」`;
+    let 群管006_30 = `发言限制：控制单条消息的字数、行数、艾特人数上限`;
+    let 群管006_31 = `发言限制 50 20 3`;//操作者（字数50 行数20 艾特3）
+    let 群管006_32 = `✅ 发言限制设置完成
+字数上限：50（0=不限制）
+行数上限：20（0=不限制）
+艾特上限：3（0=不限制）`;//机器人
+    let 群管006_33 = `也可单项设置，如「发言限制 字数 50」→ 「✅ 字数已设置为50，0代表关闭该限制」`;
+    let 群管006_34 = `查看发言限制`;//操作者
+    let 群管006_35 = `📊本群发言限制配置
+字数：50字
+行数：20行
+艾特：3人`;//机器人
+    let 群管006_36 = `超限发言会被撤回（需机器人权限高于发言者）；不会额外 @ 提示
+合并转发消息内的文本也会扫违禁词（需 NapCat 开启「启用上报解析合并消息」）`;
+    let 群管006_37 = `小总结：
+· 敏感词 → 开「违禁检测」→ 维护词库 → 设处理方式
+· 禁图/禁卡片等 → 开「进阶检测」→ 禁发指令
+· 控刷屏长度 → 「进阶检测」+ 发言限制
+· 触发后均为静默处理，不会群里公告谁触发了～`;
+    //群管系统_007
+    let 群管007_1 = `【群管系统·007】群聊发言统计（2.1.4 新增）
+开启后自动记录本群每人每日发言条数，支持查看今日/昨日/本月排行，以及个人历史汇总`;
+    let 群管007_2 = `本模块指令（需本群已授权）：
+ - 发言排行今日榜
+ - 发言排行昨日榜
+ - 发言排行七日榜
+ - 发言排行本月榜
+ - 发言排行个人榜`;
+    let 群管007_3 = `前置：事件「发言统计」必须开启，否则不会写入数据
+开启后从当下起计数，历史消息不会回溯补录`;
+    let 群管007_4 = `开启发言统计`;//操作者
+    let 群管007_5 = `这就把【发言统计】给开启！`;//机器人
+    let 群管007_6 = `数据存储：筱筱吖/扩展功能/发言统计/群号/次数统计/YYYY-MM-DD.json
+每条群消息触发时，对应 QQ 当日计数 +1（静默后台写入，无回复）`;
+    let 群管007_7 = `注意：若有人极速刷屏，频繁写文件可能导致计数异常甚至文件被重置，事件说明里也有提醒～`;
+    let 群管007_8 = `查看今日活跃排行`;
+    let 群管007_9 = `发言排行今日榜`;//操作者
+    let 群管007_10 = `共计有【3】人，消息总数:42
+══════════════
+【1】864264375 : 18条
+【2】288888888 : 15条
+【3】2071521294 : 9条`;//机器人
+    let 群管007_11 = `今日无人发言时：「好像木有获取到数据哎！？」
+≥15 人时走合并转发（标题「今日发言统计」）`;
+    let 群管007_12 = `查看昨日数据`;
+    let 群管007_13 = `发言排行昨日榜`;//操作者
+    let 群管007_14 = `共计有【2】人，消息总数:28
+══════════════
+【1】864264375 : 16条
+【2】288888888 : 12条`;//机器人
+    let 群管007_15 = `昨日无数据：「昨日暂无数据！」
+「发言排行七日榜」会汇总最近 7 天；「发言排行本月榜」从当月 1 号累计到今天`;
+    let 群管007_16 = `查看本月累计`;
+    let 群管007_17 = `发言排行本月榜`;//操作者
+    let 群管007_18 = `共计有【3】人，消息总数:156
+══════════════
+【1】864264375 : 72条
+【2】288888888 : 54条
+【3】2071521294 : 30条`;//机器人
+    let 群管007_19 = `「发言排行个人榜」= 查【发指令者本人】在各时间段的发言数，不是全群排行`;
+    let 群管007_20 = `发言排行个人榜`;//操作者
+    let 群管007_21 = `我的发言:
+今日: 18
+本周: 45
+本月: 120
+本年: 120
+--------------
+昨日: 12
+上周: 30
+上月: 85
+总次: 520`;//机器人
+    let 群管007_22 = `个人榜无历史文件时：「获取数据失败了唉！」
+排行指令不需要群管权限，群员也可查自己的个人榜～`;
+    let 群管007_23 = `小总结：
+· 想统计活跃度 → 开「发言统计」→ 等群友正常聊天积累数据
+· 看全群谁最话痨 → 今日/昨日/本月榜
+· 看自己发了多少 → 个人榜
+· 数据按天存文件，删文件 = 丢历史记录～`;
+    //群管系统_008
+    let 群管008_1 = `【群管系统·008】新用户入群欢迎（2.1.5 由「入群图片」更名并纳入群管）
+新人成功进群后，机器人自动发送可自定义的欢迎语（文字 / 可选图片版）`;
+    let 群管008_2 = `本模块指令（需主人/群管 + 本群已授权）：
+ - 设置入群欢迎词#[内容]
+相关事件【入群欢迎】`;
+    let 群管008_3 = `可用变量（写在 # 后面自由搭配）：
+[艾特] [本机头像] [新人头像] [新人QQ] [昵称] [群号] [时间] [性别] [年龄] [等级] [注册时间]`;
+    let 群管008_4 = `第一步：开启事件「入群欢迎」`;
+    let 群管008_5 = `开启入群欢迎`;//操作者
+    let 群管008_6 = `这就把【入群欢迎】给开启！`;//机器人
+    let 群管008_7 = `未自定义时默认模板：
+[艾特] ([新人QQ])欢迎你的加入
+[时间]
+保存在：筱筱吖/群管系统/入群欢迎词/群号.json`;
+    let 群管008_8 = `第二步：按需修改欢迎语（# 后面整段为模板，支持换行）`;
+    let 群管008_9 = `设置入群欢迎词#[艾特] 欢迎[昵称]([新人QQ])加入[群号]，你是在[时间]加入的`;//操作者
+    let 群管008_10 = `好哒！这就把本群的【入群欢迎语】设置为:
+[艾特] 欢迎[昵称]([新人QQ])加入[群号]，你是在[时间]加入的`;//机器人
+    let 群管008_11 = `字数须 >2，否则提示「请字数大于2个哦～」
+QQ 会把 [ ] 转成 HTML 实体，MK 写入前会自动反转义还原`;
+    let 群管008_12 = `【触发时机】监听 group_increase（已入群通知）
+需同时满足：
+① 事件「入群欢迎」开启
+② 未被黑名单拦截（放行标准=true）
+③ 入群审核状态为「无」或「已通过」（刚通过验证的新人也欢迎）`;
+    let 群管008_13 = `【场景·新人进群】QQ(288888888) 完成入群流程后，机器人在群内发送欢迎（演示）`;
+    let 群管008_14 = `@288888888 欢迎筱筱(288888888)加入1082631686，你是在2026-06-26 14:30:00加入的`;//机器人（文字版示意）
+    let 群管008_15 = `变量 [昵称][性别][年龄][等级][注册时间] 来自 get_stranger_info 接口
+[艾特]/[本机头像]/[新人头像] 会转成对应消息段（艾特、图片）`;
+    let 群管008_16 = `【图片版（可选）】config.json 里 图片渲染 = true 时：
+先用 Puppeteer 或 Python 渲染「入群身份.html」生成身份卡图，再拼接文字欢迎段
+关闭图片渲染则仅发文字版`;
+    let 群管008_17 = `与「入群验证」「入群审核」的关系：
+· 黑名单/审核拒绝 → 不会欢迎
+· 入群验证通过后才进群 → 仍会欢迎
+· 仅「入群私聊」走私聊通道，与本模块独立`;
+    let 群管008_18 = `小总结：
+· 开「入群欢迎」→ 设置入群欢迎词#模板
+· 想带头像/艾特 → 用 [新人头像][艾特] 等变量
+· 想身份卡大图 → 开图片渲染（进阶设置）
+· 改模板后立即生效，下一次新人进群就会用新文案～`;
+    //群管系统_009
+    let 群管009_1 = `【群管系统·009】群昵称马甲格式系统（2.2.5 新增）
+给群成员群名片统一加「前缀 + 原名」，例如前缀「天宫☆」+ 原名「小明」→「天宫☆小明」`;
+    let 群管009_2 = `本模块指令（需主人/群管 + 本群已授权）：
+ - 设置马甲内容[内容]
+ - 全员马甲[内容]
+相关事件【马甲系统】`;
+    let 群管009_3 = `前缀长度限制：1～18 字（超出或为空 →「请将内容控制在1 - 18个字之间！」）
+默认前缀（未设置时）：天宫☆
+存储：筱筱吖/群管系统/马甲系统/群号.json`;
+    let 群管009_4 = `第一步：开启事件「马甲系统」—— 之后成员每次发言会静默检查并修正群名片`;
+    let 群管009_5 = `开启马甲系统`;//操作者
+    let 群管009_6 = `这就把【马甲系统】给开启！`;//机器人
+    let 群管009_7 = `【自动修正·发言时】事件开启后，若当前群名片 ≠ 前缀+QQ昵称，且机器人有群管权限 → 自动 set_group_card 修正（无回复）`;
+    let 群管009_8 = `第二步：设置本群马甲前缀（只改配置，不会立刻批量改名）`;
+    let 群管009_9 = `设置马甲内容天宫☆`;//操作者
+    let 群管009_10 = `已将本群的马甲前缀改成「天宫☆」啦！`;//机器人
+    let 群管009_11 = `与原来相同会提示：「与原来的一样啦！不可以重复设置哦～」`;
+    let 群管009_12 = `第三步（可选）：「全员马甲」= 立刻对全群批量改名，并写入前缀配置
+⚠️ 执行过程中切勿取消机器人权限！`;
+    let 群管009_13 = `全员马甲天宫☆`;//操作者
+    let 群管009_14 = `正在执行改名，切勿把机器人的权限给下了！！！
+（≥10 人时会提示采取冷却，并给出预计完成时间）`;//机器人（前置提示）
+    let 群管009_15 = `「全员马甲」- 数据直接:
+══════════════
+有效人次：28
+无效人次：2
+跳过人次：5`;//机器人（合并转发·总结节点）
+    let 群管009_16 = `结束后还会发 3 个嵌套节点：有效列表 / 无效列表 / 跳过列表
+· 有效 = 改名成功
+· 无效 = 官方机器人或接口失败
+· 跳过 = 已是目标名片，无需再改`;
+    let 群管009_17 = `机器人无群管权限时：「窝没有权限改名唉～！」
+拉取成员失败：「获取群聊成员失败！1」`;
+    let 群管009_18 = `小总结：
+· 只想新人/发言时慢慢统一 → 开事件 + 设置马甲内容
+· 想立刻全群统一 → 全员马甲（记得保持机器人权限）
+· 前缀基于 QQ 昵称拼接，改 QQ 昵称后下次发言会再修正～`;
+    //发卡系统（用户端）
+    let 发卡用户_1 = `【发卡系统·用户端】用娱乐货币「归笺」兑换卡密/兑换码，成功后机器人私聊发货
+⚠️ 与「授权系统·使用卡密」完全不同：那是给群/私聊充 MK 插件授权时长，这里是花归笺买虚拟商品`;
+    let 发卡用户_2 = `【范围·全服共享】商品、库存、价格全机器人共用一份数据，不是「每个群单独一家店」
+存储根目录：筱筱吖/扩展功能/发卡系统/
+· 商品代号.json — 商品名 → 内部代号（随机生成）
+· 商品价格.json — 商品名 → 归笺单价
+· 商品上下架.json — 商品名 → true/false（未记录默认上架）
+· data/{代号}.txt — 该商品卡密库存（一行一条，先进先出）
+· data/兑换日志.json — 每次兑换记录（时间/QQ/扣款/卡密）`;
+    let 发卡用户_3 = `【归笺·也是全局】扣款读写的文件：筱筱吖/娱乐系统/游戏数据/归笺.json
+按 QQ 号累计，跨群通用；在 A 群赚到的归笺，在 B 群也能用来兑换
+归笺来源示例：签到、幸运轮盘、钓鱼等娱乐玩法（见娱乐系统相关指令）`;
+    let 发卡用户_4 = `【在哪能用】用户指令「发卡系统 / 发卡商店 / 兑换商品」群聊、私聊均可，无需 @
+前提：当前会话须已授权（群未授权时匹配指令会静默无回复；私聊未授权同理）
+发「发卡系统」可收 3 条合并菜单（总览 / 用户说明 / 管理员说明）`;
+    let 发卡用户_5 = `发卡系统`;//操作者
+    let 发卡用户_6 = `（机器人回复合并转发 3 条）
+🎴 菜单总览 · 👤 用户说明（商店/兑换）· 🔐 管理员说明（维护指令）`;//机器人
+    let 发卡用户_7 = `【浏览商店】只展示「已上架」商品；未定价显示「-」；已下架的在商店里完全不出现`;
+    let 发卡用户_8 = `发卡商店`;//操作者
+    let 发卡用户_9 = `🛒 发卡商店（仅展示上架商品）
+══════════════
+📦 月卡
+💰 价格：500 归笺
+📊 库存：12 条
+──────────────
+📦 测试商品1
+💰 价格：-
+📊 库存：0 条
+══════════════
+💡 购买：兑换商品 商品名 数量
+📖 完整说明：发卡系统`;//机器人
+    let 发卡用户_10 = `【兑换格式】兑换商品 商品名称 数量
+例：兑换商品 月卡 1
+数量须为 ≥1 的整数；商品须存在 + 已上架 + 已定价 + 库存足够 + 归笺足够，缺一不可`;
+    let 发卡用户_11 = `兑换商品 月卡 1`;//操作者（群聊示例）
+    let 发卡用户_12 = `✅ 兑换成功！卡密已通过私聊发送，请打开与机器人的私信查看。
+已扣 500 归笺，剩余 1200`;//机器人（群聊提示）
+    let 发卡用户_13 = `✅ 兑换成功（发卡系统）
+══════════════
+🛍️ 月卡 × 1
+💰 已扣 500 归笺（单价 500）
+📬 卡密如下，请妥善保管：
+1. AAAA-BBBB-1111
+══════════════
+💠 当前剩余归笺：1200`;//机器人（私聊卡密正文）
+    let 发卡用户_14 = `【私聊发货】无论你在群还是私聊发起兑换，卡密都只通过私聊发送（群聊仅提示「已私聊」）
+群内需允许成员私聊机器人，否则用户收不到卡密
+私聊直接兑换时，只发私聊成功消息，无群提示`;
+    let 发卡用户_15 = `常见失败提示：
+· 商品「xxx」不存在 — 无此商品，或已下架（下架对用户表现同不存在）
+· 尚未定价 — 主人还没「发卡商品定价」
+· 归笺不足 — 需要 X，当前 Y
+· 库存不足 — 需要 N 条，当前 M 条
+· 格式错误 — 须「兑换商品 名称 数量」`;
+    let 发卡用户_16 = `兑换商品 不存在商品 1`;//操作者
+    let 发卡用户_17 = `商品「不存在商品」不存在`;//机器人
+    let 发卡用户_18 = `小总结（用户端）：
+· 全服一家店，所有已授权群/私聊看到相同商品与库存
+· 用全局归笺购买，成功后私聊收卡密
+· 速查：发卡商店看货 → 兑换商品 名 数量
+· 完整维护流程见 MK介绍「发卡系统·管理端」～`;
+    //发卡系统（管理端）
+    let 发卡管理_1 = `【发卡系统·管理端】仅机器主人可维护商品与卡密（checkOwner3，不受「管理模式」加成）
+群聊、私聊均可发维护指令；唯一例外：「查看商品列表」必须私聊（含卡密明细，避免群里泄露）`;
+    let 发卡管理_2 = `【与群无关】在任意群或私聊添加的商品，全服立即可见；在 A 群填充的库存，B 群用户兑换也会从同一文件扣
+因此：这是机器人级「总仓」，适合统一发卡/卖码，不适合「每个群不同商品表」场景`;
+    let 发卡管理_3 = `══════════════
+【商品生命周期·推荐顺序】
+① 添加发卡商品 名称 — 登记商品，生成专属代号
+② 填充发卡商品 — 首行商品名，下列每行一条卡密
+③ 发卡商品定价 名称 价格 — 单位：归笺
+④ 发卡商品上架 名称 — 默认未写入上下架表时视为已上架
+⑤ 用户即可在「发卡商店」看到并兑换
+══════════════`;
+    let 发卡管理_4 = `添加发卡商品 月卡`;//操作者
+    let 发卡管理_5 = `好啦！已经成功添加这个商品啦，专属代号为ABC123456`;//机器人
+    let 发卡管理_6 = `填充发卡商品（多行格式）：
+填充发卡商品 月卡
+AAAA-BBBB-1111
+CCCC-DDDD-2222
+会自动去重：与库存重复、同一条消息内重复的行会跳过并统计`;
+    let 发卡管理_7 = `填充发卡商品 月卡
+AAAA-BBBB-1111
+CCCC-DDDD-2222`;//操作者
+    let 发卡管理_8 = `已向商品「月卡」添加 2 条数据`;//机器人
+    let 发卡管理_9 = `发卡商品定价 月卡 500`;//操作者
+    let 发卡管理_10 = `已为「月卡」设定价格：500 归笺`;//机器人
+    let 发卡管理_11 = `发卡商品上架 月卡 / 发卡商品下架 月卡
+· 上架 → 商店展示且可兑换
+· 下架 → 商店不展示，用户兑换时提示「不存在」
+未在 商品上下架.json 记录的商品，默认视为上架`;
+    let 发卡管理_12 = `发卡商品下架 测试商品`;//操作者
+    let 发卡管理_13 = `已将「测试商品」设为下架（商店不展示，用户无法兑换）`;//机器人
+    let 发卡管理_14 = `【其它维护指令】
+· 修改发卡商品 原名->新名 — 迁移代号与上下架；改名后请重新「发卡商品定价」（价格按商品名存储）
+· 清空发卡商品 名称 — 清空该商品全部卡密
+· 删除发卡商品 名称 + 下列卡密行 — 按行精确删除
+· 查看商品列表 — 仅私聊；合并转发含各商品库存、卡密分页（35条/页）、上下架状态`;
+    let 发卡管理_15 = `查看商品列表`;//操作者（须私聊）
+    let 发卡管理_16 = `（机器人私聊回复嵌套合并转发）
+📋 发卡汇总：种类/在售/下架/库存合计/定价统计
+🛒 各商品卡片：代号、定价、库存、状态、卡密明细`;//机器人
+    let 发卡管理_17 = `在群里发「查看商品列表」会提示：
+📋 「查看商品列表」仅限私聊使用，请私聊机器人发送该指令`;
+    let 发卡管理_18 = `【库存机制】兑换时从 data/{代号}.txt 按行先进先出取出；取失败会自动退回归笺
+兑换日志写入 data/兑换日志.json，键名：时间戳_QQ`;
+    let 发卡管理_19 = `非主人发维护指令 → 静默无回复（不会提示「无权限」）
+未授权群/私聊发任何发卡指令 → 静默无回复
+速查菜单随时可发「发卡系统」；用户侧见上一节「发卡系统·用户端」～`;
+    let 发卡管理_20 = `小总结（管理端）：
+· 维护：群聊或私聊均可（查看商品列表→私聊）
+· 数据：全服共享，一处上架处处可买，一处扣库存全局生效
+· 流程：添加 → 填充卡密 → 定价 → 上架 → 用户兑换
+· 与授权卡密、单群配置无关，是独立的扩展商店模块～`;
+    let 目录说明_2 = `【MK介绍·下篇】扩展功能 · 发卡系统
+══════════════
+上篇已发：插件原则、授权系统、事件管理(27项)、群管001～009
+本篇含：发卡系统·用户端、发卡系统·管理端（全服共享商店、归笺兑换、卡密维护）
+══════════════
+Web 后台可在「扩展功能 → 发卡系统」可视化管理商品与库存`;
+    // ================== 构建嵌套转发消息 ==================
+    const mkIntroTime = 1782441000;       // 2.3.5.alpha.3 · MK介绍
+    const authModuleTime = 1772460000;    // 2.2.0-alpha.1 · 授权系统
+    const eventModuleTime = 1770458460;   // 2.0.2 · 事件管理
+    const groupManage001Time = 1772544000; // 2.0.3-alpha.1 · 群管系统（模块001）
+    const groupManage002Time = 1772544060; // 2.0.3-alpha.1 · 入群审核（模块002）
+    const groupManage003Time = 1770458460; // 2.0.2 · 头衔系统（模块003）
+    const groupManage004Time = 1770631200; // 2.0.4 · 清理骨灰（模块004）
+    const groupManage005Time = 1770729600; // 2.0.6-alpha.1 · 黑名单系统（模块005）
+    const groupManage006Time = 1771136400; // 2.0.8-alpha.1 · 违禁词系统（模块006）
+    const groupManage007Time = 1772031300; // 2.1.4 · 发言统计（模块007）
+    const groupManage008Time = 1772283600; // 2.1.5 · 入群欢迎（模块008）
+    const groupManage009Time = 1775835900; // 2.2.5 · 马甲系统（模块009）
+    const cardShopUserTime = 1783699200;  // 2.3.6 · 发卡系统（用户端）
+    const cardShopAdminTime = 1783699800; // 2.3.6 · 发卡系统（管理端）
+    const mkIntroStep = 60;
+    function mkIntroChatTime(base, index) {
+        return base + index * mkIntroStep;
+    }
+    let 机器人账号 = 3573995540;// MK 官用演示 QQ
+    let 操作者账号 = 864264375;// 开发者 QQ
+    let 旁白账号 = 2071521294;// 旁白解说 QQ
+    const messages = [
+        合并节点("介绍", 864264375, [段_文本(目录说明)], { time: mkIntroTime }),
+        嵌套合并节点("授权系统", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_1)], { time: mkIntroChatTime(authModuleTime, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_2)], { time: mkIntroChatTime(authModuleTime, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_3b)], { time: mkIntroChatTime(authModuleTime, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_4)], { time: mkIntroChatTime(authModuleTime, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_5)], { time: mkIntroChatTime(authModuleTime, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_6)], { time: mkIntroChatTime(authModuleTime, 5) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_7)], { time: mkIntroChatTime(authModuleTime, 6) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_8)], { time: mkIntroChatTime(authModuleTime, 7) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_9)], { time: mkIntroChatTime(authModuleTime, 8) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_10)], { time: mkIntroChatTime(authModuleTime, 9) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_11)], { time: mkIntroChatTime(authModuleTime, 10) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_12)], { time: mkIntroChatTime(authModuleTime, 11) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_13)], { time: mkIntroChatTime(authModuleTime, 12) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_14)], { time: mkIntroChatTime(authModuleTime, 13) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_15)], { time: mkIntroChatTime(authModuleTime, 14) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_16)], { time: mkIntroChatTime(authModuleTime, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_17)], { time: mkIntroChatTime(authModuleTime, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_18)], { time: mkIntroChatTime(authModuleTime, 17) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_19)], { time: mkIntroChatTime(authModuleTime, 18) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_20)], { time: mkIntroChatTime(authModuleTime, 19) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_21)], { time: mkIntroChatTime(authModuleTime, 20) }),
+            合并节点("操作者", 操作者账号, [段_文本(授权介绍_22)], { time: mkIntroChatTime(authModuleTime, 21) }),
+            合并节点("机器人", 机器人账号, [段_文本(授权介绍_23)], { time: mkIntroChatTime(authModuleTime, 22) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_24)], { time: mkIntroChatTime(authModuleTime, 23) }),
+            合并节点("旁白", 旁白账号, [段_文本(授权介绍_25)], { time: mkIntroChatTime(authModuleTime, 24) }),
+        ], { time: authModuleTime }),
+        嵌套合并节点("事件管理", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_1)], { time: mkIntroChatTime(eventModuleTime, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_2)], { time: mkIntroChatTime(eventModuleTime, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_3)], { time: mkIntroChatTime(eventModuleTime, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(事件介绍_4)], { time: mkIntroChatTime(eventModuleTime, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(事件介绍_24)], { time: mkIntroChatTime(eventModuleTime, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_5)], { time: mkIntroChatTime(eventModuleTime, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_19)], { time: mkIntroChatTime(eventModuleTime, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_20)], { time: mkIntroChatTime(eventModuleTime, 7) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_21)], { time: mkIntroChatTime(eventModuleTime, 8) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_22)], { time: mkIntroChatTime(eventModuleTime, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_6)], { time: mkIntroChatTime(eventModuleTime, 10) }),
+            合并节点("操作者", 操作者账号, [段_文本(事件介绍_7)], { time: mkIntroChatTime(eventModuleTime, 11) }),
+            合并节点("机器人", 机器人账号, [段_文本(事件介绍_8)], { time: mkIntroChatTime(eventModuleTime, 12) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_9)], { time: mkIntroChatTime(eventModuleTime, 13) }),
+            合并节点("操作者", 操作者账号, [段_文本(事件介绍_10)], { time: mkIntroChatTime(eventModuleTime, 14) }),
+            合并节点("机器人", 机器人账号, [段_文本(事件介绍_11)], { time: mkIntroChatTime(eventModuleTime, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_12)], { time: mkIntroChatTime(eventModuleTime, 16) }),
+            合并节点("操作者", 操作者账号, [段_文本(事件介绍_13)], { time: mkIntroChatTime(eventModuleTime, 17) }),
+            合并节点("机器人", 机器人账号, [段_文本(事件介绍_14)], { time: mkIntroChatTime(eventModuleTime, 18) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_15)], { time: mkIntroChatTime(eventModuleTime, 19) }),
+            合并节点("操作者", 操作者账号, [段_文本(事件介绍_16)], { time: mkIntroChatTime(eventModuleTime, 20) }),
+            合并节点("机器人", 机器人账号, [段_文本(事件介绍_17)], { time: mkIntroChatTime(eventModuleTime, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_18)], { time: mkIntroChatTime(eventModuleTime, 22) }),
+            合并节点("旁白", 旁白账号, [段_文本(事件介绍_23)], { time: mkIntroChatTime(eventModuleTime, 23) }),
+        ], { time: eventModuleTime }),
+        嵌套合并节点("群管系统_001", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管001_1)], { time: mkIntroChatTime(groupManage001Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_2)], { time: mkIntroChatTime(groupManage001Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_3)], { time: mkIntroChatTime(groupManage001Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_4)], { time: mkIntroChatTime(groupManage001Time, 3) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_5)], { time: mkIntroChatTime(groupManage001Time, 4) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_6)], { time: mkIntroChatTime(groupManage001Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_7)], { time: mkIntroChatTime(groupManage001Time, 6) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_8)], { time: mkIntroChatTime(groupManage001Time, 7) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_9)], { time: mkIntroChatTime(groupManage001Time, 8) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_10)], { time: mkIntroChatTime(groupManage001Time, 9) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_11)], { time: mkIntroChatTime(groupManage001Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_12)], { time: mkIntroChatTime(groupManage001Time, 11) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_13)], { time: mkIntroChatTime(groupManage001Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_14)], { time: mkIntroChatTime(groupManage001Time, 13) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_15)], { time: mkIntroChatTime(groupManage001Time, 14) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_16)], { time: mkIntroChatTime(groupManage001Time, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_17)], { time: mkIntroChatTime(groupManage001Time, 16) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_18)], { time: mkIntroChatTime(groupManage001Time, 17) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_19)], { time: mkIntroChatTime(groupManage001Time, 18) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_20)], { time: mkIntroChatTime(groupManage001Time, 19) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_21)], { time: mkIntroChatTime(groupManage001Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_52)], { time: mkIntroChatTime(groupManage001Time, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_53)], { time: mkIntroChatTime(groupManage001Time, 22) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_54)], { time: mkIntroChatTime(groupManage001Time, 23) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_22)], { time: mkIntroChatTime(groupManage001Time, 24) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_23)], { time: mkIntroChatTime(groupManage001Time, 25) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_24)], { time: mkIntroChatTime(groupManage001Time, 26) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_25)], { time: mkIntroChatTime(groupManage001Time, 27) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_26)], { time: mkIntroChatTime(groupManage001Time, 28) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_27)], { time: mkIntroChatTime(groupManage001Time, 29) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_55)], { time: mkIntroChatTime(groupManage001Time, 30) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_28)], { time: mkIntroChatTime(groupManage001Time, 31) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_29)], { time: mkIntroChatTime(groupManage001Time, 32) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_30)], { time: mkIntroChatTime(groupManage001Time, 33) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_31)], { time: mkIntroChatTime(groupManage001Time, 34) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_32)], { time: mkIntroChatTime(groupManage001Time, 35) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_33)], { time: mkIntroChatTime(groupManage001Time, 36) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_34)], { time: mkIntroChatTime(groupManage001Time, 37) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_35)], { time: mkIntroChatTime(groupManage001Time, 38) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_36)], { time: mkIntroChatTime(groupManage001Time, 39) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_37)], { time: mkIntroChatTime(groupManage001Time, 40) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_38)], { time: mkIntroChatTime(groupManage001Time, 41) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_39)], { time: mkIntroChatTime(groupManage001Time, 42) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_40)], { time: mkIntroChatTime(groupManage001Time, 43) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_41)], { time: mkIntroChatTime(groupManage001Time, 44) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_42)], { time: mkIntroChatTime(groupManage001Time, 45) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_43)], { time: mkIntroChatTime(groupManage001Time, 46) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_44)], { time: mkIntroChatTime(groupManage001Time, 47) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_45)], { time: mkIntroChatTime(groupManage001Time, 48) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_46)], { time: mkIntroChatTime(groupManage001Time, 49) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_47)], { time: mkIntroChatTime(groupManage001Time, 50) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_48)], { time: mkIntroChatTime(groupManage001Time, 51) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_49)], { time: mkIntroChatTime(groupManage001Time, 52) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管001_50)], { time: mkIntroChatTime(groupManage001Time, 53) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管001_51)], { time: mkIntroChatTime(groupManage001Time, 54) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管001_56)], { time: mkIntroChatTime(groupManage001Time, 55) }),
+        ], { time: groupManage001Time }),
+        嵌套合并节点("群管系统_002", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管002_1)], { time: mkIntroChatTime(groupManage002Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_2)], { time: mkIntroChatTime(groupManage002Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_3)], { time: mkIntroChatTime(groupManage002Time, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_4)], { time: mkIntroChatTime(groupManage002Time, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_5)], { time: mkIntroChatTime(groupManage002Time, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_6)], { time: mkIntroChatTime(groupManage002Time, 5) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_7)], { time: mkIntroChatTime(groupManage002Time, 6) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_8)], { time: mkIntroChatTime(groupManage002Time, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_9)], { time: mkIntroChatTime(groupManage002Time, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_10)], { time: mkIntroChatTime(groupManage002Time, 9) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_11)], { time: mkIntroChatTime(groupManage002Time, 10) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_12)], { time: mkIntroChatTime(groupManage002Time, 11) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_13)], { time: mkIntroChatTime(groupManage002Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_14)], { time: mkIntroChatTime(groupManage002Time, 13) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_15)], { time: mkIntroChatTime(groupManage002Time, 14) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_16)], { time: mkIntroChatTime(groupManage002Time, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_72)], { time: mkIntroChatTime(groupManage002Time, 16) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_73)], { time: mkIntroChatTime(groupManage002Time, 17) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_74)], { time: mkIntroChatTime(groupManage002Time, 18) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_75)], { time: mkIntroChatTime(groupManage002Time, 19) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_76)], { time: mkIntroChatTime(groupManage002Time, 20) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_17)], { time: mkIntroChatTime(groupManage002Time, 21) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_18)], { time: mkIntroChatTime(groupManage002Time, 22) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_19)], { time: mkIntroChatTime(groupManage002Time, 23) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_20)], { time: mkIntroChatTime(groupManage002Time, 24) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_21)], { time: mkIntroChatTime(groupManage002Time, 25) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_22)], { time: mkIntroChatTime(groupManage002Time, 26) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_23)], { time: mkIntroChatTime(groupManage002Time, 27) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_24)], { time: mkIntroChatTime(groupManage002Time, 28) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_25)], { time: mkIntroChatTime(groupManage002Time, 29) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_77)], { time: mkIntroChatTime(groupManage002Time, 30) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_78)], { time: mkIntroChatTime(groupManage002Time, 31) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_26)], { time: mkIntroChatTime(groupManage002Time, 32) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_27)], { time: mkIntroChatTime(groupManage002Time, 33) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_28)], { time: mkIntroChatTime(groupManage002Time, 34) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_29)], { time: mkIntroChatTime(groupManage002Time, 35) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_30)], { time: mkIntroChatTime(groupManage002Time, 36) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_31)], { time: mkIntroChatTime(groupManage002Time, 37) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_32)], { time: mkIntroChatTime(groupManage002Time, 38) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_33)], { time: mkIntroChatTime(groupManage002Time, 39) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_34)], { time: mkIntroChatTime(groupManage002Time, 40) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_79)], { time: mkIntroChatTime(groupManage002Time, 41) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_80)], { time: mkIntroChatTime(groupManage002Time, 42) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_81)], { time: mkIntroChatTime(groupManage002Time, 43) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_82)], { time: mkIntroChatTime(groupManage002Time, 44) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_83)], { time: mkIntroChatTime(groupManage002Time, 45) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_35)], { time: mkIntroChatTime(groupManage002Time, 46) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_36)], { time: mkIntroChatTime(groupManage002Time, 47) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_37)], { time: mkIntroChatTime(groupManage002Time, 48) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_38)], { time: mkIntroChatTime(groupManage002Time, 49) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_39)], { time: mkIntroChatTime(groupManage002Time, 50) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_40)], { time: mkIntroChatTime(groupManage002Time, 51) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_41)], { time: mkIntroChatTime(groupManage002Time, 52) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_42)], { time: mkIntroChatTime(groupManage002Time, 53) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_43)], { time: mkIntroChatTime(groupManage002Time, 54) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_44)], { time: mkIntroChatTime(groupManage002Time, 55) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_45)], { time: mkIntroChatTime(groupManage002Time, 56) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_46)], { time: mkIntroChatTime(groupManage002Time, 57) }),
+            合并节点("机器人", 机器人账号, [段_图片(mkDemoNewbieAvatar), 段_文本(群管002_47)], { time: mkIntroChatTime(groupManage002Time, 58) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_48)], { time: mkIntroChatTime(groupManage002Time, 59) }),
+            合并节点(`新人${mkDemoNewbieQq}`, 操作者账号, [段_文本(群管002_49)], { time: mkIntroChatTime(groupManage002Time, 60) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_50)], { time: mkIntroChatTime(groupManage002Time, 61) }),
+            合并节点(`新人${mkDemoNewbieQq}`, 操作者账号, [段_文本(群管002_51)], { time: mkIntroChatTime(groupManage002Time, 62) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_52)], { time: mkIntroChatTime(groupManage002Time, 63) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_53)], { time: mkIntroChatTime(groupManage002Time, 64) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_54)], { time: mkIntroChatTime(groupManage002Time, 65) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_55)], { time: mkIntroChatTime(groupManage002Time, 66) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_56)], { time: mkIntroChatTime(groupManage002Time, 67) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_57)], { time: mkIntroChatTime(groupManage002Time, 68) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_58)], { time: mkIntroChatTime(groupManage002Time, 69) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_59)], { time: mkIntroChatTime(groupManage002Time, 70) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_60)], { time: mkIntroChatTime(groupManage002Time, 71) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_61)], { time: mkIntroChatTime(groupManage002Time, 72) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_62)], { time: mkIntroChatTime(groupManage002Time, 73) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_63)], { time: mkIntroChatTime(groupManage002Time, 74) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_64)], { time: mkIntroChatTime(groupManage002Time, 75) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_65)], { time: mkIntroChatTime(groupManage002Time, 76) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_66)], { time: mkIntroChatTime(groupManage002Time, 77) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_67)], { time: mkIntroChatTime(groupManage002Time, 78) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管002_68)], { time: mkIntroChatTime(groupManage002Time, 79) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_69)], { time: mkIntroChatTime(groupManage002Time, 80) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_70)], { time: mkIntroChatTime(groupManage002Time, 81) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管002_71)], { time: mkIntroChatTime(groupManage002Time, 82) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管002_84)], { time: mkIntroChatTime(groupManage002Time, 83) }),
+        ], { time: groupManage002Time }),
+        嵌套合并节点("群管系统_003", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管003_1)], { time: mkIntroChatTime(groupManage003Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_2)], { time: mkIntroChatTime(groupManage003Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_3)], { time: mkIntroChatTime(groupManage003Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_4)], { time: mkIntroChatTime(groupManage003Time, 3) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管003_5)], { time: mkIntroChatTime(groupManage003Time, 4) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_6)], { time: mkIntroChatTime(groupManage003Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_7)], { time: mkIntroChatTime(groupManage003Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_8)], { time: mkIntroChatTime(groupManage003Time, 7) }),
+            合并节点("群员演示", 操作者账号, [段_文本(群管003_9)], { time: mkIntroChatTime(groupManage003Time, 8) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_10)], { time: mkIntroChatTime(groupManage003Time, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_11)], { time: mkIntroChatTime(groupManage003Time, 10) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_12)], { time: mkIntroChatTime(groupManage003Time, 11) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_13)], { time: mkIntroChatTime(groupManage003Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_14)], { time: mkIntroChatTime(groupManage003Time, 13) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_15)], { time: mkIntroChatTime(groupManage003Time, 14) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管003_16)], { time: mkIntroChatTime(groupManage003Time, 15) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_17)], { time: mkIntroChatTime(groupManage003Time, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_18)], { time: mkIntroChatTime(groupManage003Time, 17) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管003_19)], { time: mkIntroChatTime(groupManage003Time, 18) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_20)], { time: mkIntroChatTime(groupManage003Time, 19) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_21)], { time: mkIntroChatTime(groupManage003Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_22)], { time: mkIntroChatTime(groupManage003Time, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_23)], { time: mkIntroChatTime(groupManage003Time, 22) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管003_24)], { time: mkIntroChatTime(groupManage003Time, 23) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管003_25)], { time: mkIntroChatTime(groupManage003Time, 24) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管003_26)], { time: mkIntroChatTime(groupManage003Time, 25) }),
+        ], { time: groupManage003Time }),
+        嵌套合并节点("群管系统_004", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管004_1)], { time: mkIntroChatTime(groupManage004Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_2)], { time: mkIntroChatTime(groupManage004Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_3)], { time: mkIntroChatTime(groupManage004Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_4)], { time: mkIntroChatTime(groupManage004Time, 3) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_5)], { time: mkIntroChatTime(groupManage004Time, 4) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管004_6)], { time: mkIntroChatTime(groupManage004Time, 5) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_7)], { time: mkIntroChatTime(groupManage004Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_8)], { time: mkIntroChatTime(groupManage004Time, 7) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_9)], { time: mkIntroChatTime(groupManage004Time, 8) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管004_10)], { time: mkIntroChatTime(groupManage004Time, 9) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_11)], { time: mkIntroChatTime(groupManage004Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_12)], { time: mkIntroChatTime(groupManage004Time, 11) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_13)], { time: mkIntroChatTime(groupManage004Time, 12) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管004_14)], { time: mkIntroChatTime(groupManage004Time, 13) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_15)], { time: mkIntroChatTime(groupManage004Time, 14) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_16)], { time: mkIntroChatTime(groupManage004Time, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_17)], { time: mkIntroChatTime(groupManage004Time, 16) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管004_18)], { time: mkIntroChatTime(groupManage004Time, 17) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_19)], { time: mkIntroChatTime(groupManage004Time, 18) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_20)], { time: mkIntroChatTime(groupManage004Time, 19) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_21)], { time: mkIntroChatTime(groupManage004Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_22)], { time: mkIntroChatTime(groupManage004Time, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_23)], { time: mkIntroChatTime(groupManage004Time, 22) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管004_24)], { time: mkIntroChatTime(groupManage004Time, 23) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_25)], { time: mkIntroChatTime(groupManage004Time, 24) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_26)], { time: mkIntroChatTime(groupManage004Time, 25) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_27)], { time: mkIntroChatTime(groupManage004Time, 26) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管004_28)], { time: mkIntroChatTime(groupManage004Time, 27) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管004_29)], { time: mkIntroChatTime(groupManage004Time, 28) }),
+        ], { time: groupManage004Time }),
+        嵌套合并节点("群管系统_005", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管005_1)], { time: mkIntroChatTime(groupManage005Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_2)], { time: mkIntroChatTime(groupManage005Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_3)], { time: mkIntroChatTime(groupManage005Time, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_4)], { time: mkIntroChatTime(groupManage005Time, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_5)], { time: mkIntroChatTime(groupManage005Time, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_6)], { time: mkIntroChatTime(groupManage005Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_7)], { time: mkIntroChatTime(groupManage005Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_8)], { time: mkIntroChatTime(groupManage005Time, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_9)], { time: mkIntroChatTime(groupManage005Time, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_10)], { time: mkIntroChatTime(groupManage005Time, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_11)], { time: mkIntroChatTime(groupManage005Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_12)], { time: mkIntroChatTime(groupManage005Time, 11) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_13)], { time: mkIntroChatTime(groupManage005Time, 12) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_14)], { time: mkIntroChatTime(groupManage005Time, 13) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_15)], { time: mkIntroChatTime(groupManage005Time, 14) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_16)], { time: mkIntroChatTime(groupManage005Time, 15) }),
+            合并节点("操作者", 操作者账号, [段_文本("添加本群黑名单"), 段_艾特(操作者账号)], { time: mkIntroChatTime(groupManage005Time, 16) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_17)], { time: mkIntroChatTime(groupManage005Time, 17) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_18)], { time: mkIntroChatTime(groupManage005Time, 18) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_19)], { time: mkIntroChatTime(groupManage005Time, 19) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_20)], { time: mkIntroChatTime(groupManage005Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_21)], { time: mkIntroChatTime(groupManage005Time, 21) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_22)], { time: mkIntroChatTime(groupManage005Time, 22) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_23)], { time: mkIntroChatTime(groupManage005Time, 23) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_24)], { time: mkIntroChatTime(groupManage005Time, 24) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_25)], { time: mkIntroChatTime(groupManage005Time, 25) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管005_26)], { time: mkIntroChatTime(groupManage005Time, 26) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管005_27)], { time: mkIntroChatTime(groupManage005Time, 27) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_28)], { time: mkIntroChatTime(groupManage005Time, 28) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_29)], { time: mkIntroChatTime(groupManage005Time, 29) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_30)], { time: mkIntroChatTime(groupManage005Time, 30) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_31)], { time: mkIntroChatTime(groupManage005Time, 31) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管005_32)], { time: mkIntroChatTime(groupManage005Time, 32) }),
+        ], { time: groupManage005Time }),
+        嵌套合并节点("群管系统_006", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管006_1)], { time: mkIntroChatTime(groupManage006Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_2)], { time: mkIntroChatTime(groupManage006Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_3)], { time: mkIntroChatTime(groupManage006Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_4)], { time: mkIntroChatTime(groupManage006Time, 3) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_5)], { time: mkIntroChatTime(groupManage006Time, 4) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_6)], { time: mkIntroChatTime(groupManage006Time, 5) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_7)], { time: mkIntroChatTime(groupManage006Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_8)], { time: mkIntroChatTime(groupManage006Time, 7) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_9)], { time: mkIntroChatTime(groupManage006Time, 8) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_10)], { time: mkIntroChatTime(groupManage006Time, 9) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_11)], { time: mkIntroChatTime(groupManage006Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_12)], { time: mkIntroChatTime(groupManage006Time, 11) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_13)], { time: mkIntroChatTime(groupManage006Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_14)], { time: mkIntroChatTime(groupManage006Time, 13) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_15)], { time: mkIntroChatTime(groupManage006Time, 14) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_16)], { time: mkIntroChatTime(groupManage006Time, 15) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_17)], { time: mkIntroChatTime(groupManage006Time, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_18)], { time: mkIntroChatTime(groupManage006Time, 17) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_19)], { time: mkIntroChatTime(groupManage006Time, 18) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_20)], { time: mkIntroChatTime(groupManage006Time, 19) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_21)], { time: mkIntroChatTime(groupManage006Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_22)], { time: mkIntroChatTime(groupManage006Time, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_23)], { time: mkIntroChatTime(groupManage006Time, 22) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_24)], { time: mkIntroChatTime(groupManage006Time, 23) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_25)], { time: mkIntroChatTime(groupManage006Time, 24) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_26)], { time: mkIntroChatTime(groupManage006Time, 25) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_27)], { time: mkIntroChatTime(groupManage006Time, 26) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_28)], { time: mkIntroChatTime(groupManage006Time, 27) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_29)], { time: mkIntroChatTime(groupManage006Time, 28) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_30)], { time: mkIntroChatTime(groupManage006Time, 29) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_31)], { time: mkIntroChatTime(groupManage006Time, 30) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_32)], { time: mkIntroChatTime(groupManage006Time, 31) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_33)], { time: mkIntroChatTime(groupManage006Time, 32) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管006_34)], { time: mkIntroChatTime(groupManage006Time, 33) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管006_35)], { time: mkIntroChatTime(groupManage006Time, 34) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_36)], { time: mkIntroChatTime(groupManage006Time, 35) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管006_37)], { time: mkIntroChatTime(groupManage006Time, 36) }),
+        ], { time: groupManage006Time }),
+        嵌套合并节点("群管系统_007", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管007_1)], { time: mkIntroChatTime(groupManage007Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_2)], { time: mkIntroChatTime(groupManage007Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_3)], { time: mkIntroChatTime(groupManage007Time, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管007_4)], { time: mkIntroChatTime(groupManage007Time, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管007_5)], { time: mkIntroChatTime(groupManage007Time, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_6)], { time: mkIntroChatTime(groupManage007Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_7)], { time: mkIntroChatTime(groupManage007Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_8)], { time: mkIntroChatTime(groupManage007Time, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管007_9)], { time: mkIntroChatTime(groupManage007Time, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管007_10)], { time: mkIntroChatTime(groupManage007Time, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_11)], { time: mkIntroChatTime(groupManage007Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_12)], { time: mkIntroChatTime(groupManage007Time, 11) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管007_13)], { time: mkIntroChatTime(groupManage007Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管007_14)], { time: mkIntroChatTime(groupManage007Time, 13) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_15)], { time: mkIntroChatTime(groupManage007Time, 14) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_16)], { time: mkIntroChatTime(groupManage007Time, 15) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管007_17)], { time: mkIntroChatTime(groupManage007Time, 16) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管007_18)], { time: mkIntroChatTime(groupManage007Time, 17) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_19)], { time: mkIntroChatTime(groupManage007Time, 18) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管007_20)], { time: mkIntroChatTime(groupManage007Time, 19) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管007_21)], { time: mkIntroChatTime(groupManage007Time, 20) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_22)], { time: mkIntroChatTime(groupManage007Time, 21) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管007_23)], { time: mkIntroChatTime(groupManage007Time, 22) }),
+        ], { time: groupManage007Time }),
+        嵌套合并节点("群管系统_008", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管008_1)], { time: mkIntroChatTime(groupManage008Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_2)], { time: mkIntroChatTime(groupManage008Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_3)], { time: mkIntroChatTime(groupManage008Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_4)], { time: mkIntroChatTime(groupManage008Time, 3) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管008_5)], { time: mkIntroChatTime(groupManage008Time, 4) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管008_6)], { time: mkIntroChatTime(groupManage008Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_7)], { time: mkIntroChatTime(groupManage008Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_8)], { time: mkIntroChatTime(groupManage008Time, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管008_9)], { time: mkIntroChatTime(groupManage008Time, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管008_10)], { time: mkIntroChatTime(groupManage008Time, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_11)], { time: mkIntroChatTime(groupManage008Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_12)], { time: mkIntroChatTime(groupManage008Time, 11) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_13)], { time: mkIntroChatTime(groupManage008Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管008_14)], { time: mkIntroChatTime(groupManage008Time, 13) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_15)], { time: mkIntroChatTime(groupManage008Time, 14) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_16)], { time: mkIntroChatTime(groupManage008Time, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_17)], { time: mkIntroChatTime(groupManage008Time, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管008_18)], { time: mkIntroChatTime(groupManage008Time, 17) }),
+        ], { time: groupManage008Time }),
+        嵌套合并节点("群管系统_009", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(群管009_1)], { time: mkIntroChatTime(groupManage009Time, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_2)], { time: mkIntroChatTime(groupManage009Time, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_3)], { time: mkIntroChatTime(groupManage009Time, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_4)], { time: mkIntroChatTime(groupManage009Time, 3) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管009_5)], { time: mkIntroChatTime(groupManage009Time, 4) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管009_6)], { time: mkIntroChatTime(groupManage009Time, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_7)], { time: mkIntroChatTime(groupManage009Time, 6) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_8)], { time: mkIntroChatTime(groupManage009Time, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管009_9)], { time: mkIntroChatTime(groupManage009Time, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管009_10)], { time: mkIntroChatTime(groupManage009Time, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_11)], { time: mkIntroChatTime(groupManage009Time, 10) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_12)], { time: mkIntroChatTime(groupManage009Time, 11) }),
+            合并节点("操作者", 操作者账号, [段_文本(群管009_13)], { time: mkIntroChatTime(groupManage009Time, 12) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管009_14)], { time: mkIntroChatTime(groupManage009Time, 13) }),
+            合并节点("机器人", 机器人账号, [段_文本(群管009_15)], { time: mkIntroChatTime(groupManage009Time, 14) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_16)], { time: mkIntroChatTime(groupManage009Time, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_17)], { time: mkIntroChatTime(groupManage009Time, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(群管009_18)], { time: mkIntroChatTime(groupManage009Time, 17) }),
+        ], { time: groupManage009Time }),
+    ];
+    const messagesIntro2 = [
+        合并节点("介绍·下篇", 864264375, [段_文本(目录说明_2)], { time: mkIntroTime + mkIntroStep }),
+        嵌套合并节点("发卡系统·用户端", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_1)], { time: mkIntroChatTime(cardShopUserTime, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_2)], { time: mkIntroChatTime(cardShopUserTime, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_3)], { time: mkIntroChatTime(cardShopUserTime, 2) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_4)], { time: mkIntroChatTime(cardShopUserTime, 3) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡用户_5)], { time: mkIntroChatTime(cardShopUserTime, 4) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡用户_6)], { time: mkIntroChatTime(cardShopUserTime, 5) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_7)], { time: mkIntroChatTime(cardShopUserTime, 6) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡用户_8)], { time: mkIntroChatTime(cardShopUserTime, 7) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡用户_9)], { time: mkIntroChatTime(cardShopUserTime, 8) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_10)], { time: mkIntroChatTime(cardShopUserTime, 9) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡用户_11)], { time: mkIntroChatTime(cardShopUserTime, 10) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡用户_12)], { time: mkIntroChatTime(cardShopUserTime, 11) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡用户_13)], { time: mkIntroChatTime(cardShopUserTime, 12) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_14)], { time: mkIntroChatTime(cardShopUserTime, 13) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_15)], { time: mkIntroChatTime(cardShopUserTime, 14) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡用户_16)], { time: mkIntroChatTime(cardShopUserTime, 15) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡用户_17)], { time: mkIntroChatTime(cardShopUserTime, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡用户_18)], { time: mkIntroChatTime(cardShopUserTime, 17) }),
+        ], { time: cardShopUserTime }),
+        嵌套合并节点("发卡系统·管理端", 旁白账号, [
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_1)], { time: mkIntroChatTime(cardShopAdminTime, 0) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_2)], { time: mkIntroChatTime(cardShopAdminTime, 1) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_3)], { time: mkIntroChatTime(cardShopAdminTime, 2) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡管理_4)], { time: mkIntroChatTime(cardShopAdminTime, 3) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡管理_5)], { time: mkIntroChatTime(cardShopAdminTime, 4) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_6)], { time: mkIntroChatTime(cardShopAdminTime, 5) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡管理_7)], { time: mkIntroChatTime(cardShopAdminTime, 6) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡管理_8)], { time: mkIntroChatTime(cardShopAdminTime, 7) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡管理_9)], { time: mkIntroChatTime(cardShopAdminTime, 8) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡管理_10)], { time: mkIntroChatTime(cardShopAdminTime, 9) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_11)], { time: mkIntroChatTime(cardShopAdminTime, 10) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡管理_12)], { time: mkIntroChatTime(cardShopAdminTime, 11) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡管理_13)], { time: mkIntroChatTime(cardShopAdminTime, 12) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_14)], { time: mkIntroChatTime(cardShopAdminTime, 13) }),
+            合并节点("操作者", 操作者账号, [段_文本(发卡管理_15)], { time: mkIntroChatTime(cardShopAdminTime, 14) }),
+            合并节点("机器人", 机器人账号, [段_文本(发卡管理_16)], { time: mkIntroChatTime(cardShopAdminTime, 15) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_17)], { time: mkIntroChatTime(cardShopAdminTime, 16) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_18)], { time: mkIntroChatTime(cardShopAdminTime, 17) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_19)], { time: mkIntroChatTime(cardShopAdminTime, 18) }),
+            合并节点("旁白", 旁白账号, [段_文本(发卡管理_20)], { time: mkIntroChatTime(cardShopAdminTime, 19) }),
+        ], { time: cardShopAdminTime }),
+    ];
+    // ================== 发送嵌套转发（分上下两篇，避免单条合并过大导致 NapCat 上传失败） ==================
+    await 发合并消息(event, messages, 合并预览(
+        "MKbot 功能介绍（上篇）",
+        "授权 · 事件 · 群管001～009",
+        "[聊天记录]",
+        ["介绍: 插件原则与群管目录", "授权系统: 卡密与授权", "事件管理: 27项事件全览", "群管001~009: 含子模块演示对话"],
+    ));
+    await 发合并消息(event, messagesIntro2, 合并预览(
+        "MKbot 功能介绍（下篇）",
+        "扩展 · 发卡系统",
+        "[聊天记录]",
+        ["介绍: 下篇说明", "发卡系统: 用户兑换与全服商店", "发卡系统: 主人维护与卡密库存"],
+    ));
+    return null;
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2703,7 +5352,133 @@ if(message.match(/^(开启|关闭)禁发(图片|视频|语音|卡片|合并转�
     return null;
 }
 
+if(message.match(/^发言限制\s+\d+\s+\d+\s+\d+$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 检 ==================
+    let arr = message.split(/\s+/);
+    let 字数数值 = Number(arr[1]);
+    let 行数值 = Number(arr[2]);
+    let 艾特数值 = Number(arr[3]);
+    let 群ID = event.group_id;
+    writeB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "字数", 字数数值);
+    writeB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "行数", 行数值);
+    writeB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "艾特", 艾特数值);
+    let 提示 = `✅ 发言限制设置完成`;
+    提示 += `\n字数上限：${字数数值}（0=不限制）`;
+    提示 += `\n行数上限：${行数值}（0=不限制）`;
+    提示 += `\n艾特上限：${艾特数值}（0=不限制）`;
+    await 发消息(event, [段_引用(event.message_id), 段_文本(`${提示}`)]);
+    return;
+}
 
+
+if(message.match(/^发言限制\s+(字数|行数|艾特)\s+\d+$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 检 ==================
+    let arr = message.split(/\s+/);
+    let 类型 = arr[1];
+    let 数值 = Number(arr[2]);
+    let 群ID = event.group_id;
+    writeB(`筱筱吖/群管功能/发言限制/${群ID}.json`, 类型, 数值);
+    await 发消息(event, [段_引用(event.message_id), 段_文本(`✅ ${类型}已设置为${数值}，0代表关闭该限制`)]);
+    return;
+}
+
+
+if(message.match(/^(查看发言限制)$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 检 ==================
+    let 群ID = event.group_id;
+    let 限制字数 = Number(readB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "字数", 0));
+    let 限制行数 = Number(readB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "行数", 0));
+    let 限制艾特 = Number(readB(`筱筱吖/群管功能/发言限制/${群ID}.json`, "艾特", 0));
+    let 提示 = `📊本群发言限制配置`;
+    提示 += `\n字数：${限制字数 == 0 ? "无限制" : 限制字数+"字"}`;
+    提示 += `\n行数：${限制行数 == 0 ? "无限制" : 限制行数+"行"}`;
+    提示 += `\n艾特：${限制艾特 == 0 ? "无限制" : 限制艾特+"人"}`;
+    await 发消息(event, [段_引用(event.message_id), 段_文本(`${提示}`)]);
+    return;
+}
+
+
+if(message == "清屏"){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 输出 ==================
+    await 发消息(event, [段_文本(`\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n`)]);
+    await 发消息(event, [段_文本(`\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n`)]);
+    await 发消息(event, [段_文本(`\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n`)]);
+    await 发消息(event, [段_文本(`\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n`)]);
+    await 发消息(event, [段_文本(`\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n`)]);
+    return null;
+}
 
 
 if(message.match(/^取消入群验证([0-9]+)$/)){
@@ -2735,8 +5510,41 @@ if(message.match(/^取消入群验证([0-9]+)$/)){
     }else{
         await 发消息(event, [段_引用(event.message_id), 段_文本(`好哒！这就给「${目标}」取消本次验证！`)]);
         writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, 目标, "无");
+        writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, 目标, false);
+        writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, 目标, false);
         return null;
     }
+}
+
+if(message.match(/^设置入群验证方式(随机数字|随机字母|随机算式)$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 取值 ==================
+    const 方式 = message.match(/^设置入群验证方式(随机数字|随机字母|随机算式)$/)[1];
+    const 当前方式 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, "验证方式", "随机数字");
+    if(当前方式 == 方式){
+        await 发消息(event, [段_引用(event.message_id), 段_文本(`本群入群验证方式已经是「${方式}」啦！`)]);
+        return null;
+    }
+    writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, "验证方式", 方式);
+    await 发消息(event, [段_引用(event.message_id), 段_文本(`好哒！这就把入群验证的【方式】改成「${方式}」`)]);
+    return null;
 }
 
 if(message.match(/^设置入群验证(次数|时长)([0-9]+)$/)){
@@ -3621,7 +6429,7 @@ if(message == "全解群员"){
 }
 
 
-if(message.match(/^获取骨灰群员(列表|)$/)){
+if(message.match(/^设置骨灰获取标准([0-9]+)(天|月|)$/)){
     // ================== 来源 ==================
     if(event.message_type != "group"){
         return null;
@@ -3640,6 +6448,60 @@ if(message.match(/^获取骨灰群员(列表|)$/)){
         }
     }
     if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+    // ================== 解析参数 ==================
+    const parsed = mk解析骨灰获取标准指令(message);
+    if(!parsed){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('指令格式有误')]);
+        return null;
+    }
+    if(!parsed.ok){
+        await 发消息(event, [段_引用(event.message_id), 段_文本(parsed.err)]);
+        return null;
+    }
+    const 旧秒 = mk读取骨灰获取标准秒(event.group_id);
+    if(旧秒 === parsed.秒数){
+        await 发消息(event, [段_引用(event.message_id), 段_文本(`当前标准已是【${parsed.展示}】啦！`)]);
+        return null;
+    }
+    writeB(mk骨灰获取标准路径(event.group_id), "秒数", parsed.秒数);
+    await 发消息(event, [段_引用(event.message_id), 段_文本(`好哒！「获取骨灰群员」的筛选标准已设为【${parsed.展示}】`)]);
+    return null;
+}
+
+
+if(message.match(/^获取(?:七日|半月|一月|)骨灰群员(列表|)$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        return null;
+    }
+    // ================== 授权判断 ==================
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    let crr_开关 = false;
+    if(event.message_type == "group"){
+        let rrrrv = readB(`筱筱吖/事件系统/${event.group_id}.json`, "管理模式", "关闭");
+        if (rrrrv == "开启"){
+            crr_开关 = true;
+        }
+    }
+    if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
+
+    // ================== 筛选标准 ==================
+    const 前缀 = (message.match(/^获取(七日|半月|一月|)骨灰群员/)?.[1] || "");
+    let 标准秒;
+    const 标准标签 = mk骨灰筛选标准标签(前缀);
+    if(前缀 === "七日"){
+        标准秒 = MK_骨灰_预设标准秒["七日"];
+    }else if(前缀 === "半月"){
+        标准秒 = MK_骨灰_预设标准秒["半月"];
+    }else if(前缀 === "一月"){
+        标准秒 = MK_骨灰_预设标准秒["一月"];
+    }else{
+        标准秒 = mk读取骨灰获取标准秒(event.group_id);
+    }
     
     writeA(`筱筱吖/群管系统/清理骨灰/${event.group_id}/目前数据.json`, "[]");
     // ================== 访问接口 ==================
@@ -3658,9 +6520,9 @@ if(message.match(/^获取骨灰群员(列表|)$/)){
     // ================== 循环 ==================
     for(let i = 0; i < 总人数; i++) {
         let 最后发言 = data[i].last_sent_time;
-        let 未发言时长 = 现在时间 - 最后发言;//86400为一天
+        let 未发言时长 = 现在时间 - 最后发言;
         // ================== 记录 ==================
-        if(未发言时长 >= 604800){
+        if(未发言时长 >= 标准秒){
             数据_one.push({
                 "QQ":data[i]["user_id"],
                 "昵称":data[i]["nickname"],
@@ -3672,7 +6534,7 @@ if(message.match(/^获取骨灰群员(列表|)$/)){
     // ================== 二次验证 ==================
     let 总人数_2 = (数据_one.length || 0);
     if(总人数_2 == 0){
-        await 发消息(event, [段_引用(event.message_id), 段_文本('好像没获取到哎～')]);
+        await 发消息(event, [段_引用(event.message_id), 段_文本(`好像没获取到哎～\n当前筛选标准：${标准标签}`)]);
         return null;
     }
     let 组装消息 = ``;
@@ -3686,7 +6548,8 @@ if(message.match(/^获取骨灰群员(列表|)$/)){
         组装消息 += `\n${i + 1}.${本次昵称}(${本次QQ})(${时长}天)`;
     }
     // ================== 组装消息 ==================
-    let 返回内容 = `共计有【${总人数_2}】位高冷人士`;
+    let 返回内容 = `筛选标准：${标准标签}`;
+    返回内容 += `\n共计有【${总人数_2}】位高冷人士`;
     返回内容 += `\n══════════════`;
     返回内容 += 组装消息;
     返回内容 += `\n══════════════`;
@@ -3737,6 +6600,8 @@ if(message.match(/^查看骨灰群员(列表|)$/)){
     返回内容 += `\n - 取消骨灰群员序号[序号]`;
     返回内容 += `\n - 取消骨灰群员序号[序号]-[序号]`;
     返回内容 += `\n - 确定清理全部骨灰群员`;
+    返回内容 += `\n - 提醒骨灰群员`;
+    返回内容 += `\n - 提醒骨灰群员[内容]`;
     返回内容 += `\n══════════════`;
     返回内容 += 组装消息;
     返回内容 += `\n══════════════`;
@@ -4252,8 +7117,8 @@ if(message == "菜单" || message == "/MK"){
         await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
         return null;
     }
-    let 发送方式 = readB("config.json", "cs_of", false);
-    if(发送方式 == false){
+    const 图片渲染开 = isImageRenderEnabled(readB);
+    if(!图片渲染开){
         // ================== 文本输出 ==================
         let 组装消息 = `══════════════`;
         组装消息 += `\n授权系统 - 群管系统 - 邀人统计`;
@@ -4268,29 +7133,52 @@ if(message == "菜单" || message == "/MK"){
         await 发消息(event, [段_引用(event.message_id), 段_文本(`${组装消息}`)]);
     }else{
         // ================== 画布输出 ==================
-        const htmlContent = readA("默认资源/导航菜单.html");
-        if(!htmlContent){
-            await 发消息(event, [段_引用(event.message_id), 段_文本('导航菜单.html 文件不存在或为空')]);
-            return null;
-        }
+        const renderMode = getRenderMode(readB);
         let menuUiTheme = "0";
-        let menuBgUrl = resolveMenuBackgroundUrl(ctx, 发送方式);
-        const imageData = await puppeteer(htmlContent, {
-            data: {
+        let menuBgUrl = resolveMenuBackgroundUrl(ctx, 图片渲染开);
+        const menuBgUrlHtml = resolveMenuHtmlBackgroundUrl(ctx, 图片渲染开);
+        const menuBgLocal = resolveDefaultResourceImageAbs("heng.jpg");
+        const menuBgLocalPortrait = resolveDefaultResourceImageAbs("shu.jpg");
+        let imageData = null;
+
+        if (renderMode === "sharp") {
+            imageData = await renderMenuWithSharp(PLUGIN_DIR, getDataPath(), {
                 uiTheme: menuUiTheme,
                 bgUrl: menuBgUrl,
-                menuBgLandscape: MENU_BG_REMOTE_LANDSCAPE,
-                menuBgPortrait: MENU_BG_REMOTE_PORTRAIT,
-            },
-            width: 1530,
-            height: 860,
-            waitForSelector: 'body[data-render-ready="1"]',
-            pageGotoTimeoutMs: 30000,
-            waitForTimeout: 300
-        });
+                bgLandscape: MENU_BG_REMOTE_LANDSCAPE,
+                bgPortrait: MENU_BG_REMOTE_PORTRAIT,
+                bgLocalPath: menuBgLocal || "",
+                bgLocalPortraitPath: menuBgLocalPortrait || "",
+                width: 1530,
+                height: 860,
+            }, logger);
+        } else {
+            const htmlContent = injectMenuIconSprite(readMenuHtmlTemplate(ctx?.pluginPath));
+            if(!htmlContent){
+                await 发消息(event, [段_引用(event.message_id), 段_文本('导航菜单.html 文件不存在或为空')]);
+                return null;
+            }
+            imageData = await puppeteer(htmlContent, {
+                data: {
+                    uiTheme: menuUiTheme,
+                    bgUrl: menuBgUrlHtml,
+                    menuBgLandscape: MENU_BG_REMOTE_LANDSCAPE,
+                    menuBgPortrait: MENU_BG_REMOTE_PORTRAIT,
+                },
+                width: 1530,
+                height: 860,
+                waitForSelector: 'body[data-render-ready="1"]',
+                pageGotoTimeoutMs: 30000,
+                waitForTimeout: 300
+            });
+        }
+
         if(!imageData){
             const why = (lastHtmlRenderError || "").trim();
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`渲染失败：${why ? why : "渲染接口不可用"}\n请检查 puppeteer 渲染插件是否已安装并启动浏览器（咔咔珂: kakake-plugin-puppeteer；NapCat: napcat-plugin-puppeteer），或在 config.json 设置 mkbot_render_api_base`)]);
+            const modeHint = renderMode === "sharp"
+                ? "请先在插件后台「进阶设置 → Sharp 运行时依赖」点击安装，或切换为 HTML 渲染"
+                : "请检查 puppeteer 渲染插件是否已安装并启动浏览器（咔咔珂: kakake-plugin-puppeteer；NapCat: napcat-plugin-puppeteer），或在 config.json 设置 mkbot_render_api_base";
+            await 发消息(event, [段_引用(event.message_id), 段_文本(`渲染失败：${why ? why : "渲染不可用"}\n${modeHint}`)]);
             return null;
         }
         const imageUrl = imageData.startsWith("base64://") ? imageData : `base64://${imageData}`;
@@ -4357,6 +7245,8 @@ if(message == "插件配置"){
     组装消息 += `\n`;
     组装消息 += `\n【插件其他配置开关】`;
     组装消息 += `\n - [开启|关闭]测试功能`;
+    组装消息 += `\n - [开启|关闭]渲染开关`;
+    组装消息 += `\n（渲染开关=图片版菜单等；模式在后台进阶设置选 HTML/Sharp）`;
     组装消息 += `\n - [开启|关闭]消息自触`;
     组装消息 += `\n - 执行插件数据备份`;
     组装消息 += `\n`;
@@ -4527,10 +7417,11 @@ if(message == "事件管理"){
         "群聊续火":"字面意思，当前版本仅为文本续火，当然也可以用一些特殊手段强行让他兼容添加图片",
         "视频解析":"目前支持哔哩哔哩、抖音、小红书、快手的视频解析，分辨率有点低，接口也有点慢",
         "问答系统":"支持【精准】和【模糊】，所有人可查看词列表，但仅主人可设置，当前仅文字+图片模式",
-        "入群验证":"是成功进群群里后的数字验证，默认5次验证，300秒内完成",
+        "入群验证":"是成功进群后的验证，默认随机数字，支持随机字母/随机算式；默认5次机会，300秒内完成",
         "马甲系统":"群内成员昵称格式化修改，通过用户原名来重命名，每执行5个用户冷却1秒",
         "管理模式":"开启后则在「默认主人」的基础上增加「本群管理员」「本群群主」等用户为机器人的控制者",
-        "入群私聊":"在新人入群后，直接给他发临时会话，该功能必须开启允许群内发起临时会话功能！"
+        "入群私聊":"在新人入群后，直接给他发临时会话，该功能必须开启允许群内发起临时会话功能！",
+        "消息记录":"开启后自动记录本群消息到「消息记录/shuju.json」；需当前群/私聊已授权（或绕过授权）；私聊还需按好友单独开关"
     };
     const count =array_shijian.length;//数量
     const count_2 =array_RCshijian.length;//数量2
@@ -4639,6 +7530,78 @@ if(message.match(/^幸运轮盘([0-9]+|)$/)){
 }
 
 if (message.match(/^(签到|打卡)$/)) {
+    function buildSignInEventsHtml(事件列表) {
+        if (!事件列表 || !事件列表.length) return "";
+        return 事件列表.map((item, index) => {
+            const safeText = String(item.text || "").replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+            const bonusClass = item.bonus ? 'bonus' : '';
+            const delay = index * 0.1;
+            return `<div class="event-tag ${bonusClass}" style="animation-delay: ${delay}s">${safeText}</div>`;
+        }).join('');
+    }
+
+    async function renderSignInCardImage(card) {
+        const mode = getRenderMode(readB);
+        const avatarUrl = card.avatarUrl || `https://q4.qlogo.cn/g?b=qq&nk=${card.userId}&s=5`;
+        if (mode === "sharp") {
+            return renderSignInWithSharp({
+                theme: card.theme,
+                userName: card.userName,
+                userId: card.userId,
+                rankText: card.rankText,
+                signed: !!card.signed,
+                guiJian: card.guiJian,
+                yuEr: card.yuEr,
+                totalDays: card.totalDays,
+                streakText: card.streakText,
+                events: card.events || [],
+                avatarUrl,
+            }, logger);
+        }
+        const htmlContent = readA("默认资源/签到.html");
+        if (!htmlContent) return null;
+        const contentHtml = card.signed
+            ? `<div class="signed-big-text">已签到</div>`
+            : `
+                <div class="points-display">
+                    <div class="points-row">
+                        <div class="point-item">
+                            <span class="point-prefix">归笺</span>
+                            <span class="point-value">+${card.guiJian}</span>
+                        </div>
+                        <div class="point-item">
+                            <span class="point-prefix">诱饵</span>
+                            <span class="point-value">+${card.yuEr}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        return puppeteer(htmlContent, {
+            data: {
+                themeClass: card.theme === "night" ? "theme-night" : "theme-day",
+                avatarUrl,
+                userName: card.userName,
+                userId: card.userId,
+                rankText: card.rankText,
+                statusText: "",
+                contentHtml,
+                totalDays: card.totalDays,
+                streakText: card.streakText,
+                eventsHtml: buildSignInEventsHtml(card.events || []),
+            },
+            width: 720,
+            height: 520,
+            deviceScaleFactor: 2,
+            waitForTimeout: 800,
+            omitBackground: true,
+        });
+    }
+
     // ================== 1. 娱乐开关检查 ==================
     if (!娱乐_开关) {
         return null;
@@ -4672,31 +7635,18 @@ if (message.match(/^(签到|打卡)$/)) {
         返回内容 += `\n════════════`;
 
         // 图片渲染
-        const 发送方式已签 = readB("config.json", "cs_of", false);
+        const 发送方式已签 = isImageRenderEnabled(readB);
         if (发送方式已签) {
             try {
-                const htmlContent = readA("默认资源/签到.html");
-                // 已签到：contentHtml 直接放“已签到”大字
-                const contentHtml = `<div class="signed-big-text">已签到</div>`;
-                const renderData = {
-                    themeClass: "theme-night",
-                    avatarUrl: `https://q4.qlogo.cn/g?b=qq&nk=${event.user_id}&s=5`,
-                    userName: `${event.sender.nickname}`, // 建议从数据库读取真实昵称
+                const imageData = await renderSignInCardImage({
+                    theme: "night",
+                    userName: `${event.sender.nickname}`,
                     userId: event.user_id,
                     rankText: `第${签到排名}名`,
-                    statusText: "", // 已不再显示，留空
-                    contentHtml: contentHtml,
+                    signed: true,
                     totalDays: `${累计次数}天`,
                     streakText: `连续 ${连续签到数量} 天`,
-                    eventsHtml: ""
-                };
-                const imageData = await puppeteer(htmlContent, {
-                    data: renderData,
-                    width: 720,
-                    height: 520,             // ✅ 高度改为 520
-                    deviceScaleFactor: 2,
-                    waitForTimeout: 800,
-                    omitBackground: true
+                    events: [],
                 });
                 if (imageData) {
                     await 发消息(event, [段_引用(event.message_id), 渲染Base64图片段(imageData)]);
@@ -4810,67 +7760,27 @@ if (message.match(/^(签到|打卡)$/)) {
     });
     writeA(每日总榜路径, JSON.stringify(每日总榜));
 
-    // ================== 9. 生成事件标签（HTML 安全转义） ==================
-    let eventsHtml = "";
+    // ================== 9. 生成事件标签 ==================
     const 事件列表 = [];
     if (周末触发) 事件列表.push({ text: "【周末翻倍×1.5】", bonus: false });
     if (节日触发) 事件列表.push({ text: 节日感言, bonus: true });
     if (连签触发) 事件列表.push({ text: 连签感言, bonus: true });
 
-    if (事件列表.length > 0) {
-        eventsHtml = 事件列表.map((item, index) => {
-            // HTML 转义防止特殊字符破坏结构
-            const safeText = item.text.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
-            const bonusClass = item.bonus ? 'bonus' : '';
-            const delay = index * 0.1;
-            return `<div class="event-tag ${bonusClass}" style="animation-delay: ${delay}s">${safeText}</div>`;
-        }).join('');
-    }
-
     // ================== 10. 图片渲染（未签到 → 白天主题 + 显示积分） ==================
-    const 发送方式签到 = readB("config.json", "cs_of", false);
+    const 发送方式签到 = isImageRenderEnabled(readB);
     if (发送方式签到) {
         try {
-            const htmlContent = readA("默认资源/签到.html");
-            // 未签到：contentHtml 显示积分增加
-            const contentHtml = `
-                <div class="points-display">
-                    <div class="points-row">
-                        <div class="point-item">
-                            <span class="point-prefix">归笺</span>
-                            <span class="point-value">+${增加归笺}</span>
-                        </div>
-                        <div class="point-item">
-                            <span class="point-prefix">诱饵</span>
-                            <span class="point-value">+${增加诱饵}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-            const renderData = {
-                themeClass: "theme-day",
-                avatarUrl: `https://q4.qlogo.cn/g?b=qq&nk=${event.user_id}&s=5`,
-                userName: `${event.sender.nickname}`, // 建议从数据库读取真实昵称
+            const imageData = await renderSignInCardImage({
+                theme: "day",
+                userName: `${event.sender.nickname}`,
                 userId: event.user_id,
                 rankText: `第${本次序号}名`,
-                statusText: "", // 已不再显示，留空
-                contentHtml: contentHtml,
+                signed: false,
+                guiJian: 增加归笺,
+                yuEr: 增加诱饵,
                 totalDays: `${累计次数 + 1}天`,
                 streakText: streak显示,
-                eventsHtml: eventsHtml
-            };
-            const imageData = await puppeteer(htmlContent, {
-                data: renderData,
-                width: 720,
-                height: 520,             // ✅ 高度改为 520
-                deviceScaleFactor: 2,
-                waitForTimeout: 800,
-                omitBackground: true
+                events: 事件列表,
             });
             if (imageData) {
                 await 发消息(event, [段_引用(event.message_id), 渲染Base64图片段(imageData)]);
@@ -4923,7 +7833,7 @@ if(message == "我的货币" || message == "我的归笺" || message == "我的�
     let 连续签到数量 = readB("筱筱吖/娱乐系统/签到数据/连签记录/连签数量.json", event.user_id, 0);
     let 诱饵数 = Number(readB("筱筱吖/娱乐系统/钓鱼玩法/道具/诱饵.json", event.user_id, 0));
     // ================== 输出：文本 or 图片 ==================
-    let 发送方式 = readB("config.json", "cs_of", false);
+    let 发送方式 = isImageRenderEnabled(readB);
     if(发送方式 == false){
         // ================== 组装消息 ==================
         let 组装消息 = `══════════════`;
@@ -4937,14 +7847,18 @@ if(message == "我的货币" || message == "我的归笺" || message == "我的�
         await 发消息(event, [段_引用(event.message_id), 段_文本(`${组装消息}`)]);
         return null;
     }
-    // 图片版：开启测试功能时输出
-    //await 发消息(event, [段_引用(event.message_id), 段_文本('正在获取图片，请稍等哟～')]);
+    // 图片版：开启图片渲染时输出
     try{
-        const htmlContent = readA("默认资源/我的信息.html");
-        const renderData = {
-            qq: String(event.user_id),
+        const cardTitle = message === "我的货币"
+            ? "我的货币"
+            : message === "我的归笺"
+              ? "我的归笺"
+              : "我的信息";
+        const walletCard = {
+            title: cardTitle,
+            userName: String(event.sender?.nickname || "旅人"),
+            userId: event.user_id,
             time: timeA("y-m-d H:i:s", Math.floor(Date.now() / 1000)),
-            title: "我的信息",
             currentMoney: moneyA(归笺),
             bankMoney: moneyA(银行归笺),
             baitCount: String(诱饵数),
@@ -4952,11 +7866,33 @@ if(message == "我的货币" || message == "我的归笺" || message == "我的�
             signStreak: String(连续签到数量),
         };
 
-        const imageData = await puppeteer(htmlContent, {
-            data: renderData,
-            width: 1080,
-            height: 720
-        });
+        let imageData = null;
+        if (getRenderMode(readB) === "sharp") {
+            imageData = await renderWalletWithSharp(walletCard, logger);
+            if (!imageData) {
+                logger.warn("[我的信息] Sharp 渲染失败，已回退 HTML 渲染");
+            }
+        }
+
+        if (!imageData) {
+            const htmlContent = readA("默认资源/我的信息.html");
+            const renderData = {
+                qq: String(event.user_id),
+                time: walletCard.time,
+                title: cardTitle,
+                currentMoney: walletCard.currentMoney,
+                bankMoney: walletCard.bankMoney,
+                baitCount: walletCard.baitCount,
+                signTotal: walletCard.signTotal,
+                signStreak: walletCard.signStreak,
+            };
+            imageData = await puppeteer(htmlContent, {
+                data: renderData,
+                width: 1080,
+                height: 720,
+            });
+        }
+
         if(imageData){
             await 发消息(event, [段_引用(event.message_id), 渲染Base64图片段(imageData)]);
         }else{
@@ -5657,7 +8593,12 @@ if (message.match(/^空间动态(?:#(\d+))?$/)) {
         };
     });
     const 转发消息 = [汇总节点, ...动态节点];
-    const 转发成功 = await 发合并消息(event, 转发消息);
+    const 转发成功 = await 发合并消息(event, 转发消息, 合并预览(
+        "QQ空间好友动态",
+        `共 ${动态节点.length + 1} 条说说动态`,
+        "[聊天记录]",
+        ["汇总: 空间动态列表", "动态: 文本与图片", "来源: QQ空间 feeds"],
+    ));
     if (!转发成功) {
         await 发消息(event, [段_引用(event.message_id), 段_文本(`合并转发发送失败，以下为 JSON 结果：\n${JSON.stringify(列表结果)}`)]);
     }
@@ -5781,7 +8722,12 @@ if(message == "音乐功能" || message == "音乐系统" || message == "音乐�
         合并节点("[音乐系统]", event.self_id, [段_文本(尾声1)]),
         合并节点("[音乐系统]", event.self_id, [段_文本(尾声2)])
     ];
-    await 发合并消息(event, messages);
+    await 发合并消息(event, messages, 合并预览(
+        "MKbot 音乐系统",
+        "点歌、歌单与多音源接口说明",
+        "[聊天记录]",
+        ["音乐系统: 点歌指令", "音源: 汽水/酷我/网易/QQ", "接口来源与使用声明"],
+    ));
     return null;
 }
 
@@ -6553,6 +9499,7 @@ const apiInterfaceResult = await handleApiInterfaceCommands(message, event, ctx,
     renderHtmlWithCompat,
     puppeteer,
     buildSimpleFortuneHtml,
+    getDataPath,
 });
 if (apiInterfaceResult === 'halt') {
     return null;
@@ -7370,11 +10317,26 @@ if(message.match(/^伪造聊天([\s\S]*)$/) || isStandaloneFakeChatJson(message)
         return null;
     }
     // ================== 发送合并消息 ==================
-    const sent = await 发合并消息(event, prepared.messages);
+    const sent = await 发合并消息(event, prepared.messages, 合并预览(
+        "伪造聊天记录",
+        `共 ${prepared.messages.length} 条自定义合并消息`,
+        "[聊天记录]",
+        prepared.messages.slice(0, 4).map((m) => {
+            const label = String(m?.name ?? "用户");
+            const textSeg = Array.isArray(m?.content)
+                ? m.content.find((s) => s?.type === "text" && s?.data?.text)
+                : null;
+            const preview = textSeg?.data?.text
+                ? String(textSeg.data.text).replace(/\s+/g, " ").trim().slice(0, 30)
+                : "[消息]";
+            return `${label}: ${preview}`;
+        }),
+    ));
     if(sent){
         await reactFakeChatCommandMessage(ctx, event.message_id, FAKE_CHAT_EMOJI_REACT_SEND_OK, BOTAPI);
     }else{
-        await 发消息(event, [段_引用(event.message_id), 段_文本('合并转发发送失败，请查看 NapCat 日志。')]);
+        const protoHint = mkIsSnowLumaBackend() ? 'SnowLuma' : 'NapCat';
+        await 发消息(event, [段_引用(event.message_id), 段_文本(`合并转发发送失败，请查看 ${protoHint} 日志。`)]);
     }
     return null;
 }
@@ -7690,8 +10652,10 @@ if(message.match(/^设置违禁处理(禁言|撤回禁言|撤回|禁言时长)([
         let 真时长 = 600;
         if(two_mub > 2592000){
             真时长 = 2592000;
+        }else{
+            真时长 = two_mub;
         }
-        if(two_mub == 时长){
+        if(时长 == 真时长){
             await 发消息(event, [段_引用(event.message_id), 段_文本('时长与原来的一样啦！')]);
             return null;
         }else{
@@ -7712,6 +10676,8 @@ if(message.match(/^设置违禁处理(禁言|撤回禁言|撤回|禁言时长)([
         }
     }
 }
+
+
 
 
 if(message.match(/^(增加|新增|添加|删除|取消|减少|清空)违禁词([\s\S]*)$/)){
@@ -7816,15 +10782,17 @@ if(message == "违禁词列表"){
 
 
 
-if(message.match(/^(开启|关闭)(测试功能|消息自触|助手模式)$/)){
+if(message.match(/^(开启|关闭)(测试功能|图片渲染|渲染开关|消息自触|助手模式)$/)){
     // ================== 最高主人检测 ==================
     if(!(await checkOwner3(event, ctx, false, false))) return null;
     // ================== 获取数据 ==================
-    const 开关 = message.match(/^(开启|关闭)(测试功能|消息自触|助手模式)$/)[1];
-    const 类型 = message.match(/^(开启|关闭)(测试功能|消息自触|助手模式)$/)[2];
+    const 开关 = message.match(/^(开启|关闭)(测试功能|图片渲染|渲染开关|消息自触|助手模式)$/)[1];
+    const 类型 = message.match(/^(开启|关闭)(测试功能|图片渲染|渲染开关|消息自触|助手模式)$/)[2];
     //获取读取的键名
     let 键名 = `cs_of`;
-    if(类型 != "测试功能"){
+    if(类型 == "图片渲染" || 类型 == "渲染开关"){
+        键名 = "图片渲染";
+    }else if(类型 != "测试功能"){
         键名 = 类型;
     }
     let 文件开关 = readB("config.json", 键名, false);
@@ -7966,7 +10934,7 @@ if(message === "运行状态"){
     }
     if(!(await checkOwner3(event, ctx, crr_开关, false))) return null;
     // ================== 检 ==================
-    let 发送方式 = readB("config.json", "cs_of", false);
+    let 发送方式 = isImageRenderEnabled(readB);
     
     const dp = await BOTAPI(ctx, "get_login_info", {});
     // ================== 检 ==================
@@ -8021,9 +10989,6 @@ if(message === "运行状态"){
         }
         
         // ================== 图片版本 ==================
-        // 读取文件
-        const htmlContent = readA("默认资源/状态.html");
-        // 构造数据
         const useLocalStatusBg = mkIsKakakeLikeFramework(ctx) && 发送方式 != false;
         const statusBgCss = resolveStatusBackgroundImageCss(ctx, 发送方式, true);
         const templateData = {
@@ -8044,6 +11009,49 @@ if(message === "运行状态"){
             backgroundImageCSS: statusBgCss,
             backgroundImageUrl: extractBgUrlFromCss(statusBgCss),
         };
+
+        let imageData = null;
+        const statusBgLocal = resolveDefaultResourceImageAbs("运行状态.jpg");
+        const statusBgDataUrl = defaultResourceImageToDataUrl("运行状态.jpg");
+        const statusBgForSharp = statusBgLocal || statusBgDataUrl || templateData.backgroundImageUrl || STATUS_BG_REMOTE_URL;
+        if (getRenderMode(readB) === "sharp") {
+            imageData = await renderStatusWithSharp({
+                name: templateData.name,
+                qq: templateData.QQ,
+                type: templateData.type,
+                arch: templateData.arch,
+                cpuCount: templateData.cpuCount,
+                cpuUsagePercent: templateData.cpuUsagePercent,
+                totalMemoryGB: templateData.totalMemoryGB,
+                memoryUsagePercent: templateData.memoryUsagePercent,
+                diskTotalGB: templateData.diskTotalGB,
+                diskUsedGB: templateData.diskUsedGB,
+                diskFreeGB: templateData.diskFreeGB,
+                diskUsagePercent: templateData.diskUsagePercent,
+                groupCount: templateData.groupCount,
+                friendCount: templateData.friendCount,
+                backgroundImageUrl: statusBgForSharp,
+                bgLocalPath: statusBgLocal || "",
+                processes: processes.slice(0, 12).map((p) => ({
+                    pid: String(p.pid || ''),
+                    name: String(p.name || 'Unknown'),
+                    memoryMB: String(p.memoryMB || '0'),
+                    cpuPercent: String(p.cpuPercent || '0'),
+                })),
+                pluginDir: PLUGIN_DIR,
+                pluginPath: String(ctx?.pluginPath || ""),
+                dataPath: getDataPath(),
+                width: 1400,
+                height: 900,
+            }, logger);
+            if (!imageData) {
+                logger.warn("[运行状态] Sharp 渲染失败，已回退 HTML 渲染");
+            }
+        }
+
+        if (!imageData) {
+        // 读取文件
+        const htmlContent = readA("默认资源/状态.html");
         // 传递
         const processDataScript = `<script>window.processData = ${JSON.stringify(processes)};</script>`;
         let finalHtml = htmlContent.replace("</head>", `${processDataScript}</head>`);
@@ -8056,7 +11064,7 @@ if(message === "运行状态"){
             waitForTimeout: 300
         };
         // 调用API
-        let imageData = await puppeteer(finalHtml, statusRenderOptions);
+        imageData = await puppeteer(finalHtml, statusRenderOptions);
         if (!imageData && useLocalStatusBg) {
             try {
                 logger.warn("[Function] 运行状态本地背景渲染失败，已回退远程背景");
@@ -8067,6 +11075,7 @@ if(message === "运行状态"){
                 ...statusRenderOptions,
                 data: templateData,
             });
+        }
         }
         // 输出
         if (imageData) {
@@ -8227,6 +11236,55 @@ if(message.match(/^(开启|关闭)(好友续火|群聊续火|全部好友续火|
     }
 }
 
+if(message.match(/^(开启|关闭)(好友消息记录|全部好友消息记录)([0-9]+|)$/)){
+    if(!(await checkOwner2(event, ctx))) return null;
+    if(RC_sq != "已授权"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('MK没能量啦～要充电电～～')]);
+        return null;
+    }
+    const 操作 = message.match(/^(开启|关闭)(好友消息记录|全部好友消息记录)([0-9]+|)$/)[1];
+    const 类型 = message.match(/^(开启|关闭)(好友消息记录|全部好友消息记录)([0-9]+|)$/)[2];
+    const 目标 = message.match(/^(开启|关闭)(好友消息记录|全部好友消息记录)([0-9]+|)$/)[3];
+    if(类型 == "好友消息记录"){
+        if(!目标 || Number(目标) <= 1000){
+            await 发消息(event, [段_引用(event.message_id), 段_文本('请指定好友QQ，例如：开启好友消息记录123456789')]);
+            return null;
+        }
+        const 开关 = readB(MK_MSG_RECORD_HAOYOU_SWITCH, 目标, "关闭");
+        if(开关 == 操作){
+            await 发消息(event, [段_引用(event.message_id), 段_文本(`目前「${目标}」的消息记录已经是【${开关}】状态啦！`)]);
+            return null;
+        }
+        writeB(MK_MSG_RECORD_HAOYOU_SWITCH, 目标, 操作);
+        await 发消息(event, [段_引用(event.message_id), 段_文本(`好哒！这就把「${目标}」的私聊消息记录给【${操作}】`)]);
+        return null;
+    }
+    const haoyouList = await BOTAPI(ctx, "get_friend_list", {});
+    const 数量 = (haoyouList?.length || 0);
+    if(数量 == 0){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('获取【好友】列表失败！')]);
+        return null;
+    }
+    let 组装消息 = `已将【${数量}】位好友的私聊消息记录统一设为「${操作}」`;
+    for(let i = 0; i < 数量; i++){
+        const 本次QQ = String(haoyouList[i]?.user_id ?? "");
+        if(!本次QQ) continue;
+        const 开关 = readB(MK_MSG_RECORD_HAOYOU_SWITCH, 本次QQ, "关闭");
+        if(开关 == 操作){
+            组装消息 += `\n${i + 1}. ${本次QQ} ❌本就${开关}`;
+        }else{
+            writeB(MK_MSG_RECORD_HAOYOU_SWITCH, 本次QQ, 操作);
+            组装消息 += `\n${i + 1}. ${本次QQ} ✅已${操作}`;
+        }
+    }
+    if(数量 >= 15){
+        await 发合并消息(event, [合并节点(`[${类型}]`, event.self_id, [段_文本(组装消息)])]);
+    }else{
+        await 发消息(event, [段_引用(event.message_id), 段_文本(组装消息)]);
+    }
+    return null;
+}
+
 if(message == "管理续火"){
     // ================== 授权判断 ==================
     if(RC_sq != "已授权"){
@@ -8309,7 +11367,12 @@ if(message == "管理续火"){
         合并节点("[管理续火]", event.self_id, [段_文本(返回内容4)]),
         合并节点("[管理续火]", event.self_id, [段_文本(返回内容5)])
     ];
-    await 发合并消息(event, messages);
+    await 发合并消息(event, messages, 合并预览(
+        "MKbot 续火管理",
+        `群聊 ${群数量} 个 · 好友 ${好友数量} 个续火状态`,
+        "[聊天记录]",
+        ["续火: 指令与模式说明", "群聊续火: 开启/关闭统计", "好友续火: 开启/关闭统计"],
+    ));
     return null;
 }
 
@@ -8885,7 +11948,12 @@ if(message == "更新插件"){
         合并节点("[下载插件]", event.self_id, [段_文本(组装消息1)]),
         合并节点("[下载插件]", event.self_id, [段_文本(组装消息2)])
     ];
-    await 发合并消息(event, messages);
+    await 发合并消息(event, messages, 合并预览(
+        "MKbot 插件下载",
+        "远程 zip 下载与解压安装说明",
+        "[聊天记录]",
+        ["下载插件: 操作流程", "MKbot 更新 zip 结构", "下载其他插件指令格式"],
+    ));
     return null;
 }
 
@@ -8908,7 +11976,7 @@ if(message === "执行插件数据备份"){
     await 发消息(event, [段_文本('正在压缩文件夹')]);
     // ================== 压缩数据包 ==================
     const 时间戳毫秒 = Date.now();
-    const 时间 = timeA("y-m-d H:i:s", Math.floor(Date.now() / 1000));
+    const 备份文件名 = mkBackupZipDisplayName(Math.floor(时间戳毫秒 / 1000));
     // ================== 备份目标路径（兼容咔咔珂 / 旧 NapCat） ==================
     const fw = ctx.frameworkEnv;
     const isMkFramework = mkIsKakakeLikeFramework(ctx);
@@ -8923,16 +11991,54 @@ if(message === "执行插件数据备份"){
         return null;
     }
     // ================== 输出方式 ==================
-    let 参数 = {"user_id": event.user_id, "file": 备份绝对路径, "name": `${时间}备份.zip`};
+    let 参数 = {"user_id": event.user_id, "file": 备份绝对路径, "name": 备份文件名};
     let 接口 = "upload_private_file";
     /*
     if(event.group_id){
-        参数 = {"group_id": event.group_id, "file": 备份绝对路径, "name": `${时间}备份.zip`, "upload_file": true};
+        参数 = {"group_id": event.group_id, "file": 备份绝对路径, "name": 备份文件名, "upload_file": true};
         接口 = "upload_group_file";
     }
     */
     // ================== 输出文件 ==================
     await BOTAPI(ctx, 接口, 参数);
+    return null;
+}
+
+
+if(message.match(/^测试管家发送([\s\S]*)$/)){
+    // ================== 来源 ==================
+    if(event.message_type != "group"){
+        await 发消息(event, [段_引用(event.message_id), 段_文本('请在群聊中使用本指令')]);
+        return null;
+    }
+    // ================== 最高主人检测 ==================
+    if(!(await checkOwner3(event, ctx, false, false))) return null;
+    const 代发正文 = message.match(/^测试管家发送([\s\S]*)$/)[1].trim() || 'MKbot 群管家代发测试';
+    const 触发管家 = async () => {
+        const 触发回复 = await BOTAPI(ctx, "send_group_msg", {
+            group_id: event.group_id,
+            message: [
+                { type: "at", data: { qq: String(GUANJIA_BOT_UIN) } },
+                { type: "text", data: { text: " " } },
+            ],
+        });
+        const 触发MsgId = 触发回复?.message_id ?? 触发回复?.data?.message_id;
+        if(触发MsgId){
+            try {
+                await BOTAPI(ctx, "delete_msg", { message_id: 触发MsgId });
+            } catch (_e) { /* ignore */ }
+        }
+    };
+    const 代发结果 = await guanjiaTestSend(ctx, readB, writeB, {
+        groupId: event.group_id,
+        text: 代发正文,
+        onNeedTrigger: 触发管家,
+    });
+    if(!代发结果.ok){
+        let 失败提示 = `群管家代发失败：${代发结果.error || '未知错误'}`;
+        if(代发结果.detail) 失败提示 += `\n${代发结果.detail}`;
+        await 发消息(event, [段_引用(event.message_id), 段_文本(失败提示)]);
+    }
     return null;
 }
 
@@ -10370,8 +13476,69 @@ if(message === "我的鱼获" || message === "我的鱼篓"){
     
     // ================== 按重量降序排序 ==================
     鱼获列表.sort((a, b) => b.重量 - a.重量);
+
+    const 鱼种数 = 鱼获列表.length;
+    const 类别数 = new Set(鱼获列表.map((鱼) => 鱼.鱼名)).size;
+    const renderItems = 鱼获列表.map((鱼) => ({
+        name: 鱼.鱼名,
+        weight: 鱼.重量,
+        count: 鱼.数量,
+        unitPrice: 鱼.单条价格,
+        totalPrice: 鱼.总价格,
+        tier: (高级鱼池 && 高级鱼池[鱼.鱼名]) ? 'premium' : 'normal',
+    }));
+
+    const 图片渲染开 = isImageRenderEnabled(readB);
+    const 可用Sharp渲染 = 图片渲染开 && getRenderMode(readB) === 'sharp' && 鱼种数 <= FISH_BASKET_MAX_ROWS;
+    let sentSharp = false;
+
+    if (可用Sharp渲染) {
+        const 是群聊 = event.message_type === 'group';
+        if (是群聊) {
+            await reactFakeChatCommandMessage(ctx, event.message_id, FAKE_CHAT_EMOJI_REACT_PARSE_OK, BOTAPI);
+        } else {
+            await 发消息(event, [段_引用(event.message_id), 段_文本('正在生成鱼篓图片，请稍候…')]);
+        }
+
+        const imageData = await renderFishBasketWithSharp({
+            userName: String(event.sender?.nickname || '旅人'),
+            userId: event.user_id,
+            time: timeA('y-m-d H:i:s', Math.floor(Date.now() / 1000)),
+            totalCount: 总数量,
+            totalValue: moneyA(总价格),
+            recordCount: 鱼种数,
+            categoryCount: 类别数,
+            items: renderItems,
+        }, logger);
+
+        if (imageData) {
+            await 发消息(event, [段_引用(event.message_id), 段_图片(`base64://${imageData}`)]);
+            if (是群聊) {
+                await reactFakeChatCommandMessage(ctx, event.message_id, FAKE_CHAT_EMOJI_REACT_SEND_OK, BOTAPI);
+            } else {
+                await 发消息(event, [段_引用(event.message_id), 段_文本('鱼篓图片已生成 ✓')]);
+            }
+            sentSharp = true;
+        } else {
+            logger.warn('[我的鱼篓] Sharp 渲染失败，已回退合并转发');
+            if (!是群聊) {
+                await 发消息(event, [段_引用(event.message_id), 段_文本('图片生成失败，已改用文字列表输出')]);
+            }
+        }
+    } else if (图片渲染开 && getRenderMode(readB) === 'sharp' && 鱼种数 > FISH_BASKET_MAX_ROWS) {
+        if (event.message_type !== 'group') {
+            await 发消息(event, [
+                段_引用(event.message_id),
+                段_文本(`规格记录 ${鱼种数} 条，超过单页上限 ${FISH_BASKET_MAX_ROWS}，已改用合并转发输出`),
+            ]);
+        }
+    }
+
+    if (sentSharp) {
+        return null;
+    }
     
-    // ================== 构建消息 ==================
+    // ================== 构建消息（文字版回退） ==================
     const messages = [];
     
     // 添加头部信息
@@ -10620,552 +13787,20 @@ if(message.match(/^出售\s+(全部鱼|[^\(]+\([0-9]+(\.[0-9]+)?kg\)(\s+\d+)?)$/
 
 
 
-if (message === "发卡系统") {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    const menuMessages = [
-        合并节点("🎴 发卡系统", event.self_id, [段_文本(`🎴 发卡系统 · 菜单总览\n══════════════\n本菜单说明「商店浏览、归笺兑换、卡密收货」及管理员维护指令。\n📌 用户向机器人发文字即可，无需 @。\n📩 兑换成功后卡密仅通过私聊发送（群内需允许机器人私聊）。`)]),
-        合并节点("👤 用户说明", event.self_id, [段_文本(`👤 用户指令\n══════════════\n🛒 发卡商店\n查看当前在售商品、价格（未定价显示 -）、库存条数（已下架的不显示）。\n\n💱 兑换商品\n用归笺购买，成功后卡密私聊送达。\n格式：兑换商品 商品名称 数量\n（已下架商品无法购买，效果同不存在）\n\n📝 使用示例：\n发卡商店\n兑换商品 月卡 1\n兑换商品 测试商品1 2`)]),
-        合并节点("🔐 管理员说明", event.self_id, [段_文本(`🔐 管理员指令（仅主人）\n══════════════\n➕ 添加发卡商品 名称\n✏️ 修改发卡商品 原名->新名\n📥 填充发卡商品（首行商品名，下列每行一条卡密）\n🗑️ 清空发卡商品 名称\n❌ 删除发卡商品（首行商品名，下列为要删的卡密行）\n💰 发卡商品定价 名称 价格数字\n📌 发卡商品上架 名称 / 发卡商品下架 名称（下架后商店不展示且不可兑换）\n📋 查看商品列表（仅私聊，合并转发含卡密明细与上下架状态）\n\n📝 使用示例：\n添加发卡商品 月卡\n修改发卡商品 月卡->大会员月卡\n发卡商品定价 月卡 500\n发卡商品下架 月卡\n发卡商品上架 月卡\n填充发卡商品 月卡\nAAAA-BBBB-1111\nCCCC-DDDD-2222\n清空发卡商品 测试商品\n删除发卡商品 月卡\n旧卡密一行\n查看商品列表`)])
-    ];
-    await 发合并消息(event, menuMessages);
+
+// ================== 发卡系统（实现见 ./auth/card-shop.ts） ==================
+const cardShopResult = await handleCardShopCommands(message, event, ctx, RC_sq, {
+    readB,
+    writeB,
+    readA,
+    writeA,
+    rand,
+    checkOwner3,
+    getDataPath,
+    发邮箱,
+});
+if (cardShopResult === 'halt') {
     return null;
-}
-
-if(message.match(/^添加发卡商品([\s\S]*)/)){
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-        if (是否主人 != false) {
-        // ================== 单向读取 ==================
-        let 目标名称 = message.match(/^添加发卡商品([\s\S]*)/)[1].trim();
-        let 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        let 商品代号 = readB(读写路径 + `商品代号.json`, 目标名称, "");
-        // ================== 内容判断 ==================
-        if(!目标名称){
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请输入商品名称哦～')]);
-            return null;
-        }
-        // ================== 判断重复 ==================
-        if(商品代号){
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`已经有过这个商品啦～\n专属代号${商品代号}`)]);
-            return null;
-        }
-        // ================== 正常写入 ==================
-        let 随机内容 = rand('A', 'Z') + rand('A', 'Z') + rand('A', 'Z') + rand(100000, 999999);
-        writeB(读写路径 + `商品代号.json`, 目标名称, 随机内容);
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`好啦！已经成功添加这个商品啦，专属代号为${随机内容}`)]);
-        return null;
-    }
-}
-
-if(message.match(/^修改发卡商品([\s\S]*?)->([\s\S]*)$/)){
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        // ================== 取值 ==================
-        const match = message.match(/^修改发卡商品([\s\S]*?)->([\s\S]*)$/);
-        let 原名称 = match[1].trim();
-        let 新名称 = match[2].trim();
-        let 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        // ================== 判断 ==================
-        if (!原名称 || !新名称) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：修改发卡商品 原名称->新名称')]);
-            return null;
-        }
-        if (原名称 === 新名称) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('原名称和新名称相同，无需修改')]);
-            return null;
-        }
-        // ================== 读取 ==================
-        let 商品代号数据 = readB(读写路径 + `商品代号.json`, undefined, undefined);
-        let 商品代号文件 = {};
-        try {
-            const content = readA(读写路径 + `商品代号.json`);
-            if (content) 商品代号文件 = JSON.parse(content);
-        } catch(e) {}
-    
-        // ================== 检查存在 ==================
-        if (!商品代号文件[原名称]) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${原名称}」不存在，无法修改`)]);
-            return null;
-        }
-        // ================== 检查占用 ==================
-        if (商品代号文件[新名称]) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${新名称}」已存在，请使用其他名称`)]);
-            return null;
-        }
-        // ================== 重新写入 ==================
-        const 原代号 = 商品代号文件[原名称];
-        商品代号文件[新名称] = 原代号;
-        delete 商品代号文件[原名称];
-        writeA(读写路径 + `商品代号.json`, JSON.stringify(商品代号文件, null, 2));
-        let 上下架表 = load发卡商品上下架表();
-        if (Object.prototype.hasOwnProperty.call(上下架表, 原名称)) {
-          上下架表[新名称] = 上下架表[原名称];
-          delete 上下架表[原名称];
-          save发卡商品上下架表(上下架表);
-        }
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`已将商品「${原名称}」更名为「${新名称}」，专属代号仍为 ${原代号}`)]);
-        return null;
-    }
-}
-
-if (message.startsWith("填充发卡商品")) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        const lines = message.split('\n');
-        if (lines.length < 2) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n填充发卡商品 商品名\\n内容1\\n内容2...')]);
-            return null;
-        }
-        const 商品名 = lines[0].replace(/^填充发卡商品/, '').trim();
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请指定商品名称')]);
-            return null;
-        }
-    
-        const 新内容数组 = lines.slice(1).filter(line => line.trim() !== "");
-        if (新内容数组.length === 0) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('没有有效内容')]);
-            return null;
-        }
-    
-        let 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        let 商品代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!商品代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在，请先添加`)]);
-            return null;
-        }
-    
-        const dataDir = path.join(getDataPath(), 读写路径, 'data');
-        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-        const filePath = path.join(dataDir, 商品代号 + '.txt');
-    
-        // 读取现有内容（按行分割，保留空行？卡密一般无空行，直接过滤空行）
-        let 现有行 = [];
-        if (fs.existsSync(filePath)) {
-            const 现有内容 = fs.readFileSync(filePath, 'utf-8');
-            现有行 = 现有内容.split(/\r?\n/).filter(line => line.trim() !== "");
-        }
-    
-        // 去重：与库存重复 + 同一条消息内重复（仅第一条生效）
-        let 待添加 = [];
-        let 与库重复 = [];
-        let 批次内重复 = [];
-        const 批次已见 = new Set();
-        for (let item of 新内容数组) {
-            if (现有行.includes(item)) {
-                与库重复.push(item);
-                continue;
-            }
-            if (批次已见.has(item)) {
-                批次内重复.push(item);
-                continue;
-            }
-            批次已见.add(item);
-            待添加.push(item);
-        }
-    
-        if (待添加.length === 0) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('没有可添加的新数据（已全部在库中或本批重复）')]);
-            return null;
-        }
-    
-        // 追加新内容
-        let 追加内容 = 待添加.join('\n');
-        let 最终内容 = 现有行.length > 0 ? 现有行.join('\n') + '\n' + 追加内容 : 追加内容;
-        fs.writeFileSync(filePath, 最终内容, 'utf-8');
-    
-        let 回复 = `已向商品「${商品名}」添加 ${待添加.length} 条数据`;
-        if (与库重复.length > 0) {
-            回复 += `，跳过与库存重复 ${与库重复.length} 条：${与库重复.join('、')}`;
-        }
-        if (批次内重复.length > 0) {
-            回复 += `；跳过本批重复 ${批次内重复.length} 条：${批次内重复.join('、')}`;
-        }
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`${回复}`)]);
-        return null;
-    }
-}
-
-if (message.match(/^清空发卡商品([\s\S]*)/)) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        let 商品名 = message.match(/^清空发卡商品([\s\S]*)/)[1].trim();
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请指定商品名称')]);
-            return null;
-        }
-    
-        let 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        let 商品代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!商品代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在`)]);
-            return null;
-        }
-    
-        const filePath = path.join(getDataPath(), 读写路径, 'data', 商品代号 + '.txt');
-        if (fs.existsSync(filePath)) {
-            fs.writeFileSync(filePath, '', 'utf-8'); // 清空内容
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`已清空商品「${商品名}」的所有数据`)]);
-        } else {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」还没有数据，无需清空`)]);
-        }
-        return null;
-    }
-}
-
-if (message.startsWith("删除发卡商品")) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        const lines = message.split('\n');
-        if (lines.length < 2) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n删除发卡商品 商品名\\n内容1\\n内容2...')]);
-            return null;
-        }
-        const 商品名 = lines[0].replace(/^删除发卡商品/, '').trim();
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请指定商品名称')]);
-            return null;
-        }
-    
-        const 待删除列表 = lines.slice(1).filter(line => line.trim() !== "");
-        if (待删除列表.length === 0) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请在下方输入要删除的内容，每行一条')]);
-            return null;
-        }
-    
-        let 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        let 商品代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!商品代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在，请先添加`)]);
-            return null;
-        }
-    
-        const dataDir = path.join(getDataPath(), 读写路径, 'data');
-        const filePath = path.join(dataDir, 商品代号 + '.txt');
-        if (!fs.existsSync(filePath)) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」还没有数据`)]);
-            return null;
-        }
-    
-        let 内容 = fs.readFileSync(filePath, 'utf-8');
-        let 行数组 = 内容.split(/\r?\n/).filter(line => line !== "");
-        let 删除成功 = [];
-        let 未找到 = [];
-        for (let 要删的 of 待删除列表) {
-            let index = 行数组.indexOf(要删的);
-            if (index !== -1) {
-                行数组.splice(index, 1);
-                删除成功.push(要删的);
-            } else {
-                未找到.push(要删的);
-            }
-        }
-        fs.writeFileSync(filePath, 行数组.join('\n'), 'utf-8');
-        
-        let 回复 = `已从商品「${商品名}」中删除 ${删除成功.length} 条数据`;
-        if (删除成功.length) 回复 += `\n成功删除：${删除成功.join('、')}`;
-        if (未找到.length) 回复 += `\n未找到：${未找到.join('、')}`;
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`${回复}`)]);
-        return null;
-    }
-}
-
-if (message.match(/^发卡商品定价\s+/)) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        const m = message.match(/^发卡商品定价\s+([\s\S]+?)\s+(\d+)$/);
-        if (!m) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n发卡商品定价 商品名称 价格数字\\n例：发卡商品定价 测试商品1 500')]);
-            return null;
-        }
-        const 商品名 = m[1].trim();
-        const 价格 = parseInt(m[2], 10);
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请填写商品名称')]);
-            return null;
-        }
-        const 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        const 代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在，请先添加发卡商品`)]);
-            return null;
-        }
-        writeB(读写路径 + `商品价格.json`, 商品名, 价格);
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`已为「${商品名}」设定价格：${价格} 归笺`)]);
-        return null;
-    }
-}
-
-if (/^发卡商品上架/.test(message)) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    if (RC_sq != "已授权") return null;
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        const 商品名 = message.replace(/^发卡商品上架\s*/, "").trim();
-        const 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n发卡商品上架 商品名称\\n（名称前可有可无空格，例：发卡商品上架 月卡 或 发卡商品上架月卡）')]);
-            return null;
-        }
-        const 代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在`)]);
-            return null;
-        }
-        let 表 = load发卡商品上下架表();
-        表[商品名] = true;
-        save发卡商品上下架表(表);
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`已将「${商品名}」设为上架（商店展示，可兑换）`)]);
-        return null;
-    }
-    return null;
-}
-
-if (/^发卡商品下架/.test(message)) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    if (RC_sq != "已授权") return null;
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        const 商品名 = message.replace(/^发卡商品下架\s*/, "").trim();
-        const 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-        if (!商品名) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n发卡商品下架 商品名称\\n（名称前可有可无空格）')]);
-            return null;
-        }
-        const 代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-        if (!代号) {
-            await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在`)]);
-            return null;
-        }
-        let 表 = load发卡商品上下架表();
-        表[商品名] = false;
-        save发卡商品上下架表(表);
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`已将「${商品名}」设为下架（商店不展示，用户无法兑换）`)]);
-        return null;
-    }
-    return null;
-}
-
-// ================== 发卡商店（公开列表） ==================
-if (message === "发卡商店" || message.trim() === "发卡商店") {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    const 代号表 = load发卡商品代号表();
-    const 价格表 = load发卡商品价格表();
-    const 上下架表 = load发卡商品上下架表();
-    const 全部名 = Object.keys(代号表).sort();
-    const 名称列表 = 全部名.filter((名) => 发卡商品是否上架(上下架表, 名));
-    if (全部名.length === 0) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本('🛒 发卡商店\\n══════════════\\n暂无商品，请先添加发卡商品')]);
-        return null;
-    }
-    if (名称列表.length === 0) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本('🛒 发卡商店\\n══════════════\\n暂无在售商品（当前全部已下架，请主人执行 发卡商品上架）')]);
-        return null;
-    }
-    let 文本 = `🛒 发卡商店（仅展示上架商品）\n══════════════\n`;
-    for (let i = 0; i < 名称列表.length; i++) {
-        const 名 = 名称列表[i];
-        const 代号 = 代号表[名];
-        const 单价 = 获取发卡商品单价(价格表, 名);
-        const 价显 = 单价 !== null ? `${单价} 归笺` : "-";
-        const 库存 = 读取发卡库存条数(代号);
-        文本 += `📦 ${名}\n💰 价格：${价显}\n📊 库存：${库存} 条\n`;
-        if (i < 名称列表.length - 1) 文本 += `──────────────\n`;
-    }
-    文本 += `══════════════\n💡 购买：兑换商品 商品名 数量\n📖 完整说明：发卡系统`;
-    await 发消息(event, [段_引用(event.message_id), 段_文本(`${文本}`)]);
-    return null;
-}
-
-if (message.match(/^兑换商品\s+/)) {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    const m = message.match(/^兑换商品\s+([\s\S]+?)\s+(\d+)$/);
-    if (!m) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本('请按格式发送：\\n兑换商品 商品名称 数量\\n例：兑换商品 测试商品1 1')]);
-        return null;
-    }
-    const 商品名 = m[1].trim();
-    const 数量 = parseInt(m[2], 10);
-    if (!商品名 || 数量 < 1) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本('商品名不能为空，数量须为≥1的整数')]);
-        return null;
-    }
-    const 读写路径 = `筱筱吖/扩展功能/发卡系统/`;
-    const 代号 = readB(读写路径 + `商品代号.json`, 商品名, "");
-    if (!代号) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在`)]);
-        return null;
-    }
-    const 上下架表 = load发卡商品上下架表();
-    if (!发卡商品是否上架(上下架表, 商品名)) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」不存在`)]);
-        return null;
-    }
-    const 价格表 = load发卡商品价格表();
-    const 单价 = 获取发卡商品单价(价格表, 商品名);
-    if (单价 === null) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`商品「${商品名}」尚未定价，无法兑换`)]);
-        return null;
-    }
-    const 总价 = 单价 * 数量;
-    const 归笺路径 = "筱筱吖/娱乐系统/游戏数据/归笺.json";
-    let 当前归笺 = Number(readB(归笺路径, event.user_id, 0));
-    if (Number.isNaN(当前归笺)) 当前归笺 = 0;
-    if (当前归笺 < 总价) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`归笺不足：需要 ${总价}，当前 ${当前归笺}`)]);
-        return null;
-    }
-    if (读取发卡库存条数(代号) < 数量) {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`库存不足（当前 ${读取发卡库存条数(代号)} 条，需要 ${数量} 条）`)]);
-        return null;
-    }
-    writeB(归笺路径, event.user_id, 当前归笺 - 总价);
-    const 取出结果 = 发卡取出前列(代号, 数量);
-    if (!取出结果.ok) {
-        writeB(归笺路径, event.user_id, 当前归笺);
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`${取出结果.reason}（已退回归笺）`)]);
-        return null;
-    }
-    const 兑换后货币 = 当前归笺 - 总价;
-    const d = new Date();
-    const px = (n) => String(n).padStart(2, "0");
-    writeB(`筱筱吖/扩展功能/发卡系统/data/兑换日志.json`, `${d.getTime()}_${event.user_id}`, {
-        时间戳毫秒: d.getTime(),
-        时间年月日时分秒: `${d.getFullYear()}-${px(d.getMonth() + 1)}-${px(d.getDate())} ${px(d.getHours())}:${px(d.getMinutes())}:${px(d.getSeconds())}`,
-        QQ: event.user_id,
-        兑换前货币: 当前归笺,
-        获得的卡密: [...取出结果.lines],
-        兑换后货币: 兑换后货币
-    });
-    const 货文本 = 取出结果.lines.map((line, idx) => `${idx + 1}. ${line}`).join("\n");
-    const 私聊event = { message_type: "private", user_id: event.user_id };
-    let 私发正文 = `✅ 兑换成功（发卡系统）\n══════════════\n🛍️ ${商品名} × ${数量}\n💰 已扣 ${总价} 归笺（单价 ${单价}）\n📬 卡密如下，请妥善保管：\n${货文本}\n══════════════\n💠 当前剩余归笺：${兑换后货币}`;
-    await 发消息(私聊event, [段_文本(私发正文)], event.message_type === "group" ? { group_id: event.group_id } : {});
-    if (event.message_type === "group") {
-        await 发消息(event, [段_引用(event.message_id), 段_文本(`✅ 兑换成功！卡密已通过私聊发送，请打开与机器人的私信查看。\n已扣 ${总价} 归笺，剩余 ${兑换后货币}`)]);
-    }
-    return null;
-}
-
-
-if (message === "查看商品列表" || message.trim() === "查看商品列表") {
-    // ================== 授权判断 ==================
-    if(RC_sq != "已授权"){
-        return null;
-    }
-    // ================== 检 ==================
-    let 是否主人 = await checkOwner3(event, ctx, false, false);
-    if (是否主人 != false) {
-        if (event.message_type !== "private") {
-            await 发消息(event, [段_引用(event.message_id), 段_文本('📋 「查看商品列表」仅限私聊使用，请私聊机器人发送该指令')]);
-            return null;
-        }
-        const 代号表 = load发卡商品代号表();
-        const 价格表 = load发卡商品价格表();
-        const 上下架表 = load发卡商品上下架表();
-        const 名称列表 = Object.keys(代号表).sort();
-        let 总库存条数 = 0;
-        let 已定价数 = 0;
-        let 在售数 = 0;
-        let 下架数 = 0;
-        for (const 名 of 名称列表) {
-            总库存条数 += 读取发卡库存条数(代号表[名]);
-            if (获取发卡商品单价(价格表, 名) !== null) 已定价数++;
-            if (发卡商品是否上架(上下架表, 名)) 在售数++;
-            else 下架数++;
-        }
-        const 未定价数 = 名称列表.length - 已定价数;
-        let 概览 = `📊 发卡商品总览\n`;
-        概览 += `══════════════\n`;
-        概览 += `🧾 商品种类：${名称列表.length}\n`;
-        概览 += `📌 在售：${在售数}　已下架：${下架数}\n`;
-        概览 += `📦 库存条数合计：${总库存条数}\n`;
-        概览 += `💰 已定价：${已定价数}　⏳ 未定价：${未定价数}\n`;
-        概览 += `══════════════\n`;
-        概览 += `以下为各商品明细（嵌套卡片）`;
-        const messages = [合并节点("📋 发卡汇总", event.self_id, [段_文本(概览)])];
-        if (名称列表.length === 0) {
-            messages[0].content[0].data.text += `\n（当前无任何商品）`;
-        }
-        const 卡密每页行数 = 35;
-        for (const 名 of 名称列表) {
-            const 代号 = 代号表[名];
-            const 单价 = 获取发卡商品单价(价格表, 名);
-            const 价显 = 单价 !== null ? `${单价} 归笺` : "-";
-            const 卡密行 = 读取发卡库存非空行(代号);
-            const 库存 = 卡密行.length;
-            const 状态显 = 发卡商品是否上架(上下架表, 名) ? "上架（商店可见、可兑换）" : "下架（商店不展示、不可兑换）";
-            const 基础 = `🛍️ ${名}\n🔑 专属代号：${代号}\n💰 定价：${价显}\n📊 当前库存：${库存} 条\n📌 状态：${状态显}`;
-            const forward子节点 = [];
-            if (库存 === 0) {
-                forward子节点.push(合并节点("📦 详情", event.self_id, [段_文本(`${基础}\n\n📜 暂无卡密`)]));
-            } else if (库存 <= 卡密每页行数) {
-                const 列表体 = 卡密行.map((line, j) => `${j + 1}. ${line}`).join("\n");
-                forward子节点.push(合并节点("📦 详情", event.self_id, [段_文本(`${基础}\n\n📜 卡密列表\n══════════════\n${列表体}`)]));
-            } else {
-                forward子节点.push(合并节点("📦 详情", event.self_id, [段_文本(`${基础}\n\n📜 卡密较多，已按 ${卡密每页行数} 条/页拆分见下方`)]));
-                for (let i = 0; i < 卡密行.length; i += 卡密每页行数) {
-                    const 片 = 卡密行.slice(i, i + 卡密每页行数);
-                    const 起 = i + 1;
-                    const 止 = i + 片.length;
-                    const 列表体 = 片.map((line, j) => `${i + j + 1}. ${line}`).join("\n");
-                    forward子节点.push(合并节点("🔐 卡密", event.self_id, [段_文本(`🔐 ${名} 卡密 ${起}-${止}/${库存}\n══════════════\n${列表体}`)]));
-                }
-            }
-            messages.push(嵌套合并节点("🛒 商品", event.self_id, forward子节点, {}, [段_文本(`「${名}」`)]));
-        }
-        await 发合并消息(event, messages);
-        return null;
-    }
 }
 
 
@@ -11268,8 +13903,13 @@ if(message.match(/^全员马甲([\s\S]*)/)){
             let 本次QQ = dp[i].user_id;
             let 原名 = dp[i].nickname;
             let 现名 = dp[i].card;
-            let 需求 = 内容 + 原名;
+            let 需求 = buildMajiaCard(内容, 原名);
             let 改吗 = true;
+            if(!sanitizeMajiaNickname(原名)){
+                无效 += `\n${无效次数 + 1}.${dp[i].user_id}`;
+                无效次数++;
+                改吗 = false;
+            }
             if(现名 == 需求){
                 跳过 += `\n${跳过次数 + 1}.${dp[i].user_id}`;
                 跳过次数++;
@@ -11751,14 +14391,23 @@ if(message == "拍我" || message == "截我"){
 
 if(message.match(/撤回/)){
     if( (await checkOwner3(event, ctx, false, false)) == true && RC_sq == "已授权" && event.message_type == "group" ){
-        const ID = event?.message[0]?.data?.id;//获取被引用ID
-        if(ID != "" && ID != undefined){
-            let dp188 = await BOTAPI(ctx, "get_group_member_info", {group_id: event.group_id,user_id: event.self_id});
+        let 引用消息ID = "";
+        for (const seg of (event?.message || [])) {
+            if (seg?.type === "reply") {
+                引用消息ID = seg?.data?.id || "";
+                break;
+            }
+        }
+        if(引用消息ID != "" && 引用消息ID != undefined){
+            const 目标QQ = await resolveQuotedMessageUserId(ctx, 引用消息ID);
+            if (目标QQ == null || 目标QQ === "") return;
+
+            let dp188 = await BOTAPI(ctx, "get_group_member_info", {group_id: event.group_id, user_id: event.self_id});
             let Robot身份 = (RC_group_role[(dp188?.role || "member")] || 0);
-            let dp199 = await BOTAPI(ctx, "get_group_member_info", {group_id: event.group_id,user_id: event?.raw?.records[0]?.senderUin});
+            let dp199 = await BOTAPI(ctx, "get_group_member_info", {group_id: event.group_id, user_id: 目标QQ});
             let 目标身份 = (RC_group_role[(dp199?.role || "member")] || 0);
-            if(Robot身份 > 目标身份 || Robot身份 == 3 || event?.raw?.records[0]?.senderUin == event.self_id){
-                await BOTAPI(ctx, "delete_msg", {message_id : ID});
+            if(Robot身份 > 目标身份 || Robot身份 == 3 || 目标QQ == event.self_id){
+                await BOTAPI(ctx, "delete_msg", {message_id : 引用消息ID});
             }
         }
     }
@@ -11969,19 +14618,7 @@ if(message.match(/[\s\S]*/)){
                     if(机器人等级 > 用户等级){//神权王
                         // ================== 高级条件验证 ==================
                         let wjc_cc = JSON.parse(readA(`筱筱吖/群管系统/违禁系统/${event.group_id}/违禁词.json`) || "[]");
-                        let 条件数量 = wjc_cc.length;
-                        let 成功与否 = false;
-                        let 临时数据 = `无`;
-                        for(let i = 0; i < 条件数量; i++) {
-                            let 本次键 = wjc_cc[i];
-                            if(message.includes(本次键) == true){
-                                成功与否 = true;
-                                //临时数据 = `内容:${本次键}`;//调试
-                                break;
-                            }else{
-                                //临时数据 = "无";//调试
-                            }
-                        }
+                        let 成功与否 = forbiddenWordsMatchText(eventForbiddenWordMatchText(event), wjc_cc);
                         //处理方式
                         if(成功与否){
                             //ctx.logger.info(`违禁词触发:${临时数据}`);//调试
@@ -12009,10 +14646,10 @@ if(message.match(/[\s\S]*/)){
             if(马甲开关 == "开启"){
                 let 马甲 = (readA(`筱筱吖/群管系统/马甲系统/${event.group_id}.json`) || "天宫☆");
                 let 字数 = (马甲.length || 0);
-                let 原名 = event.sender.nickname;
+                let 原名 = sanitizeMajiaNickname(event.sender.nickname);
                 let 现名 = event.sender.card;
-                let 组装后 = 马甲 + 原名;
-                if(字数 > 0 && 组装后 != 现名){
+                let 组装后 = buildMajiaCard(马甲, event.sender.nickname);
+                if(字数 > 0 && 原名 && 组装后 != 现名){
                     // ================== 二次正确赋值 ==================
                     if(机器人等级 == 0){
                         let 参数188 = {group_id : event.group_id,user_id : event.self_id};
@@ -12022,9 +14659,12 @@ if(message.match(/[\s\S]*/)){
                     }
                     // ================== 判断是否有权限(2级即可) ==================
                     if(机器人等级 >= 2){
-                        // ================== 调用接口 ==================
-                        let 参数 = {"group_id": event.group_id, "user_id": event.user_id, "card": 组装后};
-                        await BOTAPI(ctx, "set_group_card", 参数);
+                        try {
+                            let 参数 = {"group_id": event.group_id, "user_id": event.user_id, "card": 组装后};
+                            await BOTAPI(ctx, "set_group_card", 参数);
+                        } catch (_e) {
+                            // QQ 拒改（超长等）时静默跳过，避免刷屏 ERROR
+                        }
                     }
                 }
             }
@@ -12069,26 +14709,9 @@ if(message.match(/[\s\S]*/)){
                                 let 违禁开关 = readB(`筱筱吖/事件系统/${event.group_id}.json`, "违禁检测", "关闭");
                                 if(违禁开关 == "开启"){
                                     let wjc_cc = JSON.parse(readA(`筱筱吖/群管系统/违禁系统/${event.group_id}/违禁词.json`) || "[]");
-                                    let 条件数量 = wjc_cc.length;
-                                    let 成功与否 = false;
-                                    let 临时数据 = `无`;
-                                    let 临时文本 = ``;
                                     const forwardMsg = firstSeg;
                                     const content = (forwardMsg && forwardMsg.data && Array.isArray(forwardMsg.data.content)) ? forwardMsg.data.content : [];
-                                    content.forEach((msg, index) => {
-                                        //logger.error(`[第 ${index + 1} 条] ${msg.sender.nickname}: ${msg.raw_message}`);
-                                        临时文本 += msg.raw_message;
-                                    });
-                                    for(let i = 0; i < 条件数量; i++) {
-                                        let 本次键 = wjc_cc[i];
-                                        if(临时文本.includes(本次键) == true){
-                                            成功与否 = true;
-                                            //临时数据 = `内容:${本次键}`;//调试
-                                            break;
-                                        }else{
-                                            //临时数据 = "无";//调试
-                                        }
-                                    }
+                                    let 成功与否 = forbiddenWordsMatchText(collectForbiddenWordMatchText(content), wjc_cc);
                                     if(成功与否){
                                         //ctx.logger.info(`违禁词触发:${临时数据}`);//调试
                                         let 类型 = readB(`筱筱吖/群管系统/违禁系统/${event.group_id}/处理.json`, "方式", "撤回");
@@ -12210,11 +14833,7 @@ if(message.match(/([\s\S]*)/)){
         const 解析首段类型 = 解析首段 && typeof 解析首段 === "object" ? 解析首段.type : "";
         let 解析链接 = ``;
         let 解析方向 = `哔哩哔哩`;
-        // 链接正则跑在「raw_message + 各段 text」上：入参 message 即 raw_message；部分客户端 URL 只在结构化 text 里
-        const 结构化文本 = Array.isArray(event.message)
-            ? event.message.filter((s) => s?.type === "text" && s.data?.text).map((s) => s.data.text).join("\n")
-            : "";
-        const 链接扫描文本 = `${message}\n${结构化文本}`;
+        const 链接扫描文本 = eventUserTextFromSegments(event);
         // ================== 通过卡片取链接 ==================
         if(解析首段类型 == "json"){
             // 如果是字符串，需要解析
@@ -12552,18 +15171,19 @@ if(message.match(/([\s\S]*)/)){
         let 问答开关 = readB(`筱筱吖/事件系统/${event.group_id}.json`, "问答系统", "关闭");
         if(问答开关 == "开启"){//开关判断
             let 回复状态 = false;
+            const 问答文本 = eventUserTextFromSegments(event);
             const 精准数据 = JSON.parse(readA(`筱筱吖/扩展功能/问答系统/${event.group_id}/精准.json`) || "{}");
             const 模糊数据 = JSON.parse(readA(`筱筱吖/扩展功能/问答系统/${event.group_id}/模糊.json`) || "{}");
             // ================== 精准判断 ==================
-            if(精准数据[message]){
-                let 答案 = 精准数据[message];
+            if(问答文本 && 精准数据[问答文本]){
+                let 答案 = 精准数据[问答文本];
                 await 发消息(event, [段_引用(event.message_id), ...mkQaAnswerToSegments(答案)]);
                 回复状态 = true;
             }
             // ================== 模糊判断 ==================
-            if(回复状态 == false){
+            if(回复状态 == false && 问答文本){
                 for(let 关键词 in 模糊数据){
-                    if(message.includes(关键词)){
+                    if(问答文本.includes(关键词)){
                         let 答案 = 模糊数据[关键词];
                         await 发消息(event, [段_引用(event.message_id), ...mkQaAnswerToSegments(答案)]);
                         break;
@@ -13145,12 +15765,18 @@ if(RC_sq != "已授权"){
     return null;
 }
 
+// ================== 消息记录 · 撤回追回 ==================
+if(noticeType === "group_recall" || noticeType === "friend_recall"){
+    await mkHandleMessageRecallNotify(event, ctx);
+    return null;
+}
+
 
 // ================== 拍一拍回复 ==================
 if(event.sub_type === "poke"){
     let 发起者 = event.user_id;
     let 被拍者 = event.target_id;
-    let 发送方式 = readB("config.json", "cs_of", false);
+    let 发送方式 = isImageRenderEnabled(readB);
     if(发送方式 == true){
         if(event.target_id == event.self_id){
             // ================== 数据读取 ==================
@@ -13254,6 +15880,10 @@ if(noticeType === "group_ban") {
 
 // ================== 已入群通知 ==================
 if (noticeType === "group_increase") {
+    if (mkIsDuplicateGroupIncrease(event)) {
+        logger?.warn?.(`[入群通知] 已忽略重复 group_increase：群${event.group_id} 用户${event.user_id}`);
+        return null;
+    }
     let 放行标准 = true;
     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "无");
     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, event.user_id, 0);
@@ -13355,10 +15985,88 @@ if (noticeType === "group_increase") {
             let Robot身份 = (RC_group_role[(dp188?.role || "member")] || 0);
             if(Robot身份 >= 2){
                 // ================== 输出内容 ==================
-                let 验证值 = rand(1000, 9999);
+                let 验证方式 = readB(`筱筱吖/群管系统/入群审核/${event.group_id}/次数.json`, "验证方式", "随机数字");
+                if(验证方式 != "随机字母" && 验证方式 != "随机算式") 验证方式 = "随机数字";
+                let 验证值 = "";
+                let 验证提示 = "";
+                if(验证方式 == "随机字母"){
+                    let 字母表 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                    for(let j = 0; j < 4; j++){
+                        验证提示 += 字母表[rand(0, 字母表.length - 1)];
+                    }
+                    验证值 = 验证提示;
+                }else if(验证方式 == "随机算式"){
+                    let 测试已开 = readB("config.json", "cs_of", false) == true;
+                    let 可用运算 = 测试已开 ? ["+", "-", "×", "÷"] : ["+", "-"];
+                    let 运算次数 = rand(1, 5);
+                    let 首数 = rand(1, 9999);
+                    验证提示 = String(首数);
+                    let 链尾值 = 首数;
+                    for(let j = 0; j < 运算次数; j++){
+                        let 运算符 = 可用运算[rand(0, 可用运算.length - 1)];
+                        if((运算符 == "×" || 运算符 == "÷") && 链尾值 > 999) 运算符 = ["+", "-"][rand(0, 1)];
+                        if(运算符 == "÷"){
+                            let 下一数 = rand(1, 999);
+                            if(下一数 < 1) 下一数 = 1;
+                            while(下一数 > 1 && 链尾值 % 下一数 != 0) 下一数 = rand(1, Math.min(999, Math.max(1, 链尾值)));
+                            if(链尾值 % 下一数 != 0){
+                                运算符 = "+";
+                                下一数 = rand(1, 9999);
+                                验证提示 += "+" + 下一数;
+                                链尾值 = 下一数;
+                            }else{
+                                验证提示 += "÷" + 下一数;
+                                链尾值 = Math.floor(链尾值 / 下一数);
+                            }
+                        }else if(运算符 == "×"){
+                            let 下一数 = rand(1, 999);
+                            验证提示 += "×" + 下一数;
+                            链尾值 = 链尾值 * 下一数;
+                        }else if(运算符 == "+"){
+                            let 下一数 = rand(1, 9999);
+                            验证提示 += "+" + 下一数;
+                            链尾值 = 下一数;
+                        }else{
+                            let 下一数 = rand(1, 9999);
+                            验证提示 += "-" + 下一数;
+                            链尾值 = 下一数;
+                        }
+                    }
+                    验证提示 += "=?";
+                    let 令牌 = 验证提示.replace(/=\?$/, "").match(/\d+|[+\-×÷]/g);
+                    if(令牌){
+                        let 数值 = [Number(令牌[0])];
+                        let 符号 = [];
+                        for(let t = 1; t < 令牌.length; t += 2){
+                            符号.push(令牌[t]);
+                            数值.push(Number(令牌[t + 1]));
+                        }
+                        for(let t = 0; t < 符号.length; t++){
+                            if(符号[t] == "×" || 符号[t] == "÷"){
+                                let 左 = 数值[t];
+                                let 右 = 数值[t + 1];
+                                数值[t] = 符号[t] == "×" ? 左 * 右 : Math.floor(左 / 右);
+                                数值.splice(t + 1, 1);
+                                符号.splice(t, 1);
+                                t--;
+                            }
+                        }
+                        let 算式结果 = 数值[0];
+                        for(let t = 0; t < 符号.length; t++){
+                            算式结果 = 符号[t] == "+" ? 算式结果 + 数值[t + 1] : 算式结果 - 数值[t + 1];
+                        }
+                        验证值 = String(算式结果);
+                    }else{
+                        验证值 = 验证提示;
+                    }
+                }else{
+                    验证值 = String(rand(1000, 9999));
+                    验证提示 = 验证值;
+                }
                 let 验证正文 = ` (${event.user_id})\n请在${Math.floor(秒数 / 60)}分钟内发送一下内容进行验证是否活人！`;
                 验证正文 += `\n------------------`;
-                验证正文 += `\n[验证内容]:${验证值}`;
+                验证正文 += `\n[验证方式]:${验证方式}`;
+                验证正文 += `\n[验证内容]:${验证提示}`;
                 验证正文 += `\n[可以机会]:${可用次数}次`;
                 验证正文 += `\n------------------`;
                 验证正文 += `\n[现在时间]:${timeA("y-m-d H:i:s", Math.floor(Date.now() / 1000))}`;
@@ -13370,6 +16078,7 @@ if (noticeType === "group_increase") {
                 ]);
                 // ================== 记录内容 ==================
                 writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, 验证值);
+                writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, 验证提示);
                 writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "验证中");
                 // ================== 循环冷却 ==================
                 for(let i = 0; i < 秒数; i++){
@@ -13394,8 +16103,11 @@ if (noticeType === "group_increase") {
                             await 发消息(fakeEvent, [段_文本(`【通报】\n[用户]:${event.user_id}\n在规定时间内未成功验证，已处理！`)]);
                             let ccc = {group_id: event.group_id, user_id: [event.user_id], reject_add_request: false};
                             BOTAPI(ctx, "set_group_kick_members", ccc);
+                            writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+                            writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
                         }else{
                             writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+                            writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
                             writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "无");
                         }
                     }else{
@@ -13441,7 +16153,7 @@ if (noticeType === "group_increase") {
     // ================== 邀人统计结束 ==================
     // ================== 入群欢迎 ==================
     let 欢迎开关 = readB(`筱筱吖/事件系统/${event.group_id}.json`, "入群欢迎", "关闭");
-    let 文件开关 = readB("config.json", "cs_of", false);
+    let 文件开关 = isImageRenderEnabled(readB);
     if(欢迎开关 == "开启" && 放行标准 == true && (审核状态 == "无" || 审核状态 == "已通过")){
         // ================== 访问接口 ==================
         let 参数 = {user_id : event.user_id};
@@ -13487,13 +16199,33 @@ if (noticeType === "group_increase") {
                     "zhuce" : String(注册时间),
                     "jiaqun" : String(现在时间)
                 };
+                let imageData = null;
+                if (getRenderMode(readB) === "sharp") {
+                    imageData = await renderJoinIdentityWithSharp({
+                        qq: renderData.qq,
+                        name: renderData.name,
+                        sex: renderData.sex,
+                        birthday: renderData.rrrr,
+                        age: renderData.age,
+                        qqLevel: renderData.denji,
+                        regTime: renderData.zhuce,
+                        joinTime: renderData.jiaqun,
+                        width: 1400,
+                        height: 850,
+                    }, logger);
+                    if (!imageData) {
+                        logger.warn("[入群身份] Sharp 渲染失败，已回退 HTML 渲染");
+                    }
+                }
+                if (!imageData) {
                 // 调用 Puppeteer 渲染
                 const htmlContent = readA("默认资源/入群身份.html");
-                const imageData = await puppeteer(htmlContent, {
+                imageData = await puppeteer(htmlContent, {
                     data: renderData,
                     width: 1400,
                     height: 850
                 });
+                }
                 if (imageData) {
                     // 发送渲染后的图片
                     if(放行标准 == true){
@@ -13525,6 +16257,7 @@ if (noticeType === "group_increase") {
 if(noticeType == "group_decrease") {
     // 清理入群审核相关缓存
     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证码.json`, event.user_id, false);
+    writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/验证内容.json`, event.user_id, false);
     writeB(`筱筱吖/群管系统/入群审核/${event.group_id}/审核状态.json`, event.user_id, "已退群");
 
     // 读取群级开关
@@ -14029,7 +16762,7 @@ async function handleScheduledTask(ctx) {
             let 文件夹名字 = mkResolvePluginStorageName(ctx);
             // ================== 压缩数据包 ==================
             let 时间戳毫秒 = Date.now();
-            let 时间 = timeA("y-m-d H:i:s", Math.floor(Date.now() / 1000));
+            let 备份文件名 = mkBackupZipDisplayName(Math.floor(时间戳毫秒 / 1000));
             // ================== 备份目标路径（兼容咔咔珂 / 旧 NapCat） ==================
             const fw = ctx.frameworkEnv;
             const isMkFramework = mkIsKakakeLikeFramework(ctx);
@@ -14044,7 +16777,7 @@ async function handleScheduledTask(ctx) {
                 return null;
             }
             // ================== 输出方式 ==================
-            let 参数 = {"user_id": 转发QQ, "file": 备份绝对路径, "name": `${时间}备份.zip`};
+            let 参数 = {"user_id": 转发QQ, "file": 备份绝对路径, "name": 备份文件名};
             // ================== 输出文件 ==================
             await mkScheduledBotAPI(ctx, "upload_private_file", 参数);
         }
@@ -14134,8 +16867,45 @@ function looksLikeDefaultResourceBundle(dir) {
   return false;
 }
 
+/** 插件包内 HTML 模板：每次初始化强制覆盖到运行时 data，避免旧版 remixicon 等残留 */
+const MK_BUNDLED_TEMPLATE_FORCE_REFRESH = new Set([
+  '导航菜单.html',
+  '状态.html',
+  '签到.html',
+  '今日运势.html',
+]);
+
+/** 菜单渲染优先读插件包内模板，避免运行时 data 里旧文件导致图标发黑 */
+function readMenuHtmlTemplate(pluginPath) {
+  const candidates = [];
+  const pp = String(pluginPath || '').trim();
+  if (pp) candidates.push(path.join(pp, 'data', '默认资源', '导航菜单.html'));
+  candidates.push(path.join(PLUGIN_DIR, 'data', '默认资源', '导航菜单.html'));
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const t = fs.readFileSync(p, 'utf-8');
+        if (String(t || '').trim()) return t;
+      }
+    } catch (_e) {}
+  }
+  return readA('默认资源/导航菜单.html') || '';
+}
+
+/** 注入内联 SVG sprite，不依赖 remixicon CDN */
+function injectMenuIconSprite(html) {
+  const raw = String(html || '');
+  if (!raw.trim()) return raw;
+  if (raw.includes('mk-menu-icon-sprite')) return raw;
+  const sprite = buildMenuIconSpriteSvg();
+  if (/<body[^>]*>/i.test(raw)) {
+    return raw.replace(/<body([^>]*)>/i, `<body$1>\n${sprite}`);
+  }
+  return `${sprite}\n${raw}`;
+}
+
 /**
- * 将 fromRoot 整棵树合并到 toRoot；onlyMissing 为 true 时不覆盖已存在文件。
+ * 将 fromRoot 整棵树合并到 toRoot；onlyMissing 为 true 时不覆盖已存在文件（模板 HTML 除外）。
  */
 function mergeDefaultResourcesTree(fromRoot, toRoot, log, opts) {
   const onlyMissing = opts && opts.onlyMissing !== false;
@@ -14151,7 +16921,11 @@ function mergeDefaultResourcesTree(fromRoot, toRoot, log, opts) {
       } else {
         const parent = path.dirname(to);
         if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
-        if (!onlyMissing || !fs.existsSync(to)) {
+        const relKey = nextParts.join('/');
+        const forceRefresh =
+          MK_BUNDLED_TEMPLATE_FORCE_REFRESH.has(ent.name) ||
+          MK_BUNDLED_TEMPLATE_FORCE_REFRESH.has(relKey);
+        if (forceRefresh || !onlyMissing || !fs.existsSync(to)) {
           fs.copyFileSync(from, to);
         }
       }
@@ -14159,7 +16933,9 @@ function mergeDefaultResourcesTree(fromRoot, toRoot, log, opts) {
   }
   if (!fs.existsSync(toRoot)) fs.mkdirSync(toRoot, { recursive: true });
   walk(fromRoot, []);
-  log?.info?.(`[MKbot] 默认资源树已写入: ${toRoot}${onlyMissing ? '（仅补缺）' : ''}`);
+  log?.info?.(
+    `[MKbot] 默认资源树已写入: ${toRoot}${onlyMissing ? '（仅补缺，模板 HTML 强制刷新）' : ''}`,
+  );
 }
 
 /**
@@ -14227,6 +17003,15 @@ const plugin_init = async (ctx) => {
   }
 
   setDataPath(dp);
+  configureSharpRuntimePaths(mkSharpDepsPaths(ctx));
+
+  const mkMailSecret = randomBytes(24).toString('hex');
+  setMkQqMailInternalSecret(mkMailSecret);
+  mkMailSendDeps = { readA, writeA, getDataPath, __mkMailInternal: mkMailSecret };
+  offlineNotifyDeps = { readA, writeA, getDataPath, 发邮箱 };
+
+  mkSetProtocolBackendSetting(readB("config.json", "mkbot_protocol_backend", "auto"));
+  await bindBotCtxWithProtocol(ctx);
 
   logger.info("没事别更新！更新前要记得备份！");
   logger.error("没事别更新！更新前要记得备份！");
@@ -14248,6 +17033,9 @@ const plugin_init = async (ctx) => {
     logger.info(`[MKbot] HTML渲染接口: ${mkBuildRenderApiUrl(renderApiBase)}（需安装 kakake-plugin-puppeteer）`);
     logger.info(`[MKbot] 本插件数据目录: ${dp}`);
     syncDefaultResourcesFromPluginBundle(ctx.pluginPath, dp, logger);
+    if (mkIsSnowLumaBackend()) {
+      logger.info("[MKbot] 协议后端: SnowLuma（嵌套合并转发等已启用 SnowLuma 兼容）");
+    }
   } else if (isMkJsbot) {
     renderPluginId = "kakake-plugin-puppeteer";
     const host = fw.adminHost === '0.0.0.0' || fw.adminHost === '::' ? '127.0.0.1' : fw.adminHost;
@@ -14258,6 +17046,9 @@ const plugin_init = async (ctx) => {
     logger.info(`[MKbot] HTML渲染接口: ${mkBuildRenderApiUrl(renderApiBase)}（需安装 kakake-plugin-puppeteer）`);
     logger.info(`[MKbot] 本插件数据目录: ${dp}`);
     syncDefaultResourcesFromPluginBundle(ctx.pluginPath, dp, logger);
+    if (mkIsSnowLumaBackend()) {
+      logger.info("[MKbot] 协议后端: SnowLuma（嵌套合并转发等已启用 SnowLuma 兼容）");
+    }
   } else {
     renderPluginId = "napcat-plugin-puppeteer";
     // NapCat：渲染走本机 NapCat 与 WebUI 同端口（与 webui.json 一致）；默认 6099 仅在未改端口时成立
@@ -14295,6 +17086,9 @@ const plugin_init = async (ctx) => {
     logger?.info?.(
       `[MKbot] NapCat 环境，HTML渲染接口: ${mkBuildRenderApiUrl(renderApiBase)}（可在插件 config.json 设置 mkbot_render_api_base 覆盖）`
     );
+    if (mkIsSnowLumaBackend()) {
+      logger?.info?.("[MKbot] 协议后端: SnowLuma（嵌套合并转发等已启用 SnowLuma 兼容）");
+    }
     // ================== data数据转移（NapCat 等旧布局） ==================
     logger.warn("正在进行文件夹数据转移，请等待加载完成！");
     let 配置文件路径 = path.join(ctx.pluginPath, 'package.json');//获取配置文件路径的
@@ -14313,6 +17107,12 @@ const plugin_init = async (ctx) => {
       logger.error(`移动失败: ${error.message}`);
       logger.error(`移动失败: ${error.message}`);
       logger.error(`移动失败: ${error.message}`);
+    }
+    try {
+      const runtimeData = mkResolvePluginRuntimeDataDir(ctx);
+      syncDefaultResourcesFromPluginBundle(ctx.pluginPath, runtimeData, logger);
+    } catch (e) {
+      logger?.warn?.('[MKbot] NapCat 默认资源同步失败:', e?.message);
     }
   }
   
@@ -14346,6 +17146,16 @@ const plugin_init = async (ctx) => {
       
       if (currentConfig.nowonernr === undefined) {
         currentConfig.nowonernr = "你不是她.......";
+      }
+
+      if (currentConfig.图片渲染 === undefined && currentConfig.cs_of === true) {
+        currentConfig.图片渲染 = true;
+      }
+      if (currentConfig.渲染模式 === undefined) {
+        currentConfig.渲染模式 = "html";
+      }
+      if (String(currentConfig.渲染模式).toLowerCase() === "python") {
+        currentConfig.渲染模式 = "sharp";
       }
       
       fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
@@ -14495,6 +17305,44 @@ const plugin_init = async (ctx) => {
         } catch (error) {
           logger?.error("获取配置失败:", error);
           res.status(500).json({ code: -1, message: "获取配置失败" });
+        }
+      });
+
+      base.get(wrapPath("/bot-info"), async (_req, res) => {
+        try {
+          let userId = "";
+          let nickname = "";
+          try {
+            const login = await BOTAPI(ctx, "get_login_info", {});
+            userId = String(login?.user_id ?? "").trim();
+            nickname = String(login?.nickname ?? login?.user_name ?? "").trim();
+          } catch (e) {
+            logger?.warn?.("[WebUI] get_login_info 失败:", e?.message || e);
+          }
+          if (!userId) {
+            const uin = ctx?.core?.selfInfo?.uin ?? ctx?.core?.selfInfo?.user_id;
+            if (uin != null && String(uin).trim()) userId = String(uin).trim();
+          }
+          const avatarUrl = userId
+            ? `https://q4.qlogo.cn/g?b=qq&nk=${encodeURIComponent(userId)}&s=640`
+            : "";
+          res.json({
+            code: 0,
+            data: { userId, nickname, avatarUrl, connected: Boolean(userId) },
+          });
+        } catch (error) {
+          logger?.error("获取机器人信息失败:", error);
+          res.status(500).json({ code: -1, message: "获取机器人信息失败" });
+        }
+      });
+
+      base.get(wrapPath("/sharp-deps/status"), async (_req, res) => {
+        try {
+          const status = await getSharpDependencyStatus(mkSharpDepsPaths(ctx));
+          res.json({ code: 0, data: status });
+        } catch (error) {
+          logger?.error("[Sharp依赖] 状态查询失败:", error);
+          res.status(500).json({ code: -1, message: "状态查询失败" });
         }
       });
 
@@ -14668,6 +17516,15 @@ const plugin_init = async (ctx) => {
           res.status(500).json({ code: -1, message: "获取自动点赞模式失败" });
         }
       });
+
+      const cardShopWebDeps = { readA, writeA, writeB, getDataPath, rand };
+      registerCardShopWebGetRoutes(base, wrapPath, cardShopWebDeps, logger);
+
+      const qqMailWebDeps = { readA, writeA, getDataPath };
+      registerQqMailWebGetRoutes(base, wrapPath, qqMailWebDeps, logger);
+
+      const offlineNotifyWebDeps = { readA, writeA, getDataPath };
+      registerOfflineNotifyWebGetRoutes(base, wrapPath, offlineNotifyWebDeps, logger);
 
       const MK_BROADCAST_JSON = "筱筱吖/扩展功能/群发系统/可群发.json";
       const MK_BROADCAST_JSON_LINES = "筱筱吖/扩展功能/群发系统/自定义JSON消息.json";
@@ -15362,6 +18219,22 @@ const plugin_init = async (ctx) => {
           }
         });
 
+        base.post(wrapPath("/sharp-deps/install"), async (_req, res) => {
+          try {
+            const paths = mkSharpDepsPaths(ctx);
+            const result = await triggerSharpDependencyInstall(paths, logger);
+            const status = await getSharpDependencyStatus(paths);
+            res.json({
+              code: 0,
+              message: result.message,
+              data: status,
+            });
+          } catch (error) {
+            logger?.error("[Sharp依赖] 启动安装失败:", error);
+            res.status(500).json({ code: -1, message: error?.message || "启动安装失败" });
+          }
+        });
+
         base.post(wrapPath("/time-data"), async (req, res) => {
           try {
             let body = req.body;
@@ -15444,6 +18317,57 @@ const plugin_init = async (ctx) => {
           } catch (error) {
             logger?.error("获取深度娱乐开关状态失败:", error);
             res.status(500).json({ code: -1, message: `获取深度娱乐开关状态失败: ${error.message}` });
+          }
+        });
+
+        // 私聊消息记录（按好友单独开关）- 查询
+        base.post(wrapPath("/msg-record/status"), async (req, res) => {
+          try {
+            let body = req.body;
+            if (!body || Object.keys(body).length === 0) {
+              const raw = await new Promise((resolve) => {
+                let data = "";
+                req.on("data", (chunk) => data += chunk);
+                req.on("end", () => resolve(data));
+              });
+              if (raw) body = JSON.parse(raw);
+            }
+            const userId = String(body?.user_id || "").trim();
+            if (!userId || !/^\d+$/.test(userId)) {
+              res.status(400).json({ code: -1, message: "user_id 无效" });
+              return;
+            }
+            const enabled = readB(MK_MSG_RECORD_HAOYOU_SWITCH, userId, "关闭") === "开启";
+            res.json({ code: 0, data: { enabled } });
+          } catch (error) {
+            logger?.error("查询消息记录开关失败:", error);
+            res.status(500).json({ code: -1, message: "查询消息记录开关失败" });
+          }
+        });
+
+        // 私聊消息记录（按好友单独开关）- 设置
+        base.post(wrapPath("/msg-record/set"), async (req, res) => {
+          try {
+            let body = req.body;
+            if (!body || Object.keys(body).length === 0) {
+              const raw = await new Promise((resolve) => {
+                let data = "";
+                req.on("data", (chunk) => data += chunk);
+                req.on("end", () => resolve(data));
+              });
+              if (raw) body = JSON.parse(raw);
+            }
+            const userId = String(body?.user_id || "").trim();
+            const enabled = !!body?.enabled;
+            if (!userId || !/^\d+$/.test(userId)) {
+              res.status(400).json({ code: -1, message: "user_id 无效" });
+              return;
+            }
+            writeB(MK_MSG_RECORD_HAOYOU_SWITCH, userId, enabled ? "开启" : "关闭");
+            res.json({ code: 0, data: { enabled } });
+          } catch (error) {
+            logger?.error("设置消息记录开关失败:", error);
+            res.status(500).json({ code: -1, message: "设置消息记录开关失败" });
           }
         });
 
@@ -16094,6 +19018,10 @@ const plugin_init = async (ctx) => {
           }
         });
 
+        registerCardShopWebPostRoutes(base, wrapPath, cardShopWebDeps, logger);
+        registerQqMailWebPostRoutes(base, wrapPath, qqMailWebDeps, logger);
+        registerOfflineNotifyWebPostRoutes(base, wrapPath, offlineNotifyWebDeps, logger);
+
         // 修改数据：保存（并发校验）
         base.post(wrapPath("/data-edit/update"), async (req, res) => {
           try {
@@ -16346,7 +19274,7 @@ const plugin_init = async (ctx) => {
 };
 
 const plugin_onmessage = async (ctx, event) => {
-  bindBotCtx(ctx);
+  await bindBotCtxWithProtocol(ctx);
   const 自触开关 = readB("config.json", "自触开关", false);
   
   // 判断是否处理消息
@@ -16388,7 +19316,13 @@ const plugin_onmessage = async (ctx, event) => {
 };
 
 const plugin_onevent = async (ctx, event) => {
-  bindBotCtx(ctx);
+  await bindBotCtxWithProtocol(ctx);
+  if (event.post_type === 'notice' && event.notice_type === 'bot_offline') {
+    if (offlineNotifyDeps) {
+      await handleOfflineNotifyBotOffline(event, offlineNotifyDeps);
+    }
+    return;
+  }
   if (event.post_type === "notice") {
     await handleNotice(event, ctx);
   } else if (event.post_type === "request") {
@@ -16436,7 +19370,7 @@ function plugin_on_config_change(ctx, _, key, value) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-/** 插件禁用/卸载时停止整点定时器，并禁止回调末尾再次 scheduleNextTask */
+/** 插件禁用/卸载：停止定时器、终止 Sharp 安装子进程、释放模块引用 */
 const plugin_cleanup = async (_ctx) => {
   globalThis.__mk_scheduler_armed = false;
   if (globalThis.__mk_scheduler_timer) {
@@ -16447,7 +19381,23 @@ const plugin_cleanup = async (_ctx) => {
     clearInterval(globalThis.__mkbot_broadcast_schedule_timer);
     globalThis.__mkbot_broadcast_schedule_timer = undefined;
   }
-  logger?.info?.('[定时任务] 已停止（插件禁用或卸载）');
+  globalThis.__mkbot_broadcast_send_busy = false;
+
+  try {
+    cancelSharpDependencyInstall(logger);
+  } catch (e) {
+    logger?.warn?.('[MKbot] 取消 Sharp 安装任务异常:', e?.message || e);
+  }
+  try {
+    resetSharpModuleCache();
+  } catch (_e) {}
+
+  try {
+    bindBotCtx(null);
+  } catch (_e) {}
+
+  logger?.info?.('[MKbot] 插件已清理（定时任务、群发调度、Sharp 安装已停止）');
+  logger?.warn?.('[MKbot] 若仍无法删除插件目录，请先停用插件再重启宿主（Sharp 原生模块卸载前可能占用 node_modules）');
 };
 
 export { 
@@ -16457,7 +19407,7 @@ export {
   plugin_onevent, 
   plugin_config_ui, 
   plugin_on_config_change,
-  // 导出工具函数供外部使用
+  // 导出工具函数供外部使用（发邮箱  intentionally omitted — MK 内部专用）
   readA, readB, writeA, writeB, deleteKey, hasKey, getKeys, clear,
   timeA, timeB, rand, moneyA, downloadFile,
   发合并消息, 发消息, 发语音, 发视频, 发卡片, 发音乐卡片, giveAT, giveImages, giveImages_name, giveText, BOTAPI,
@@ -16466,4 +19416,5 @@ export {
   getSystemInfo, getProcessList, puppeteer,
   unzipFile, zipFile,
   qzonePublishDynamic, qzoneGetFeeds, qzoneLike, qzoneComment, qzoneReplyComment,
+  guanjiaTestSend, captureGuanjiaTokenFromMessage, ensureGuanjiaToken,
 };

@@ -4,8 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MK-Bot 使用帮助</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.6.0/fonts/remixicon.css" rel="stylesheet">
   <script>
     (function () {
       var raw = "{{uiTheme}}";
@@ -173,10 +171,11 @@
       line-height: 1;
     }
 
-    .help-icon i {
-      font-size: clamp(14px, 2.5vmin, 18px);
-      line-height: 1;
-      font-style: normal;
+    .help-icon svg {
+      width: clamp(14px, 2.5vmin, 18px);
+      height: clamp(14px, 2.5vmin, 18px);
+      display: block;
+      color: #fff6e8;
     }
 
     .help-title {
@@ -229,9 +228,9 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
 
-    html[data-theme="clear"] .help-icon i {
-      color: #fff8eb;
-      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    html[data-theme="clear"] .help-icon svg {
+      color: #fff6e8;
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
     }
 
     html[data-theme="clear"] .help-title {
@@ -279,7 +278,7 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
     }
 
-    html[data-theme="light"] .help-icon i {
+    html[data-theme="light"] .help-icon svg {
       color: #6b5434;
     }
 
@@ -331,68 +330,68 @@
       <div class="help-table">
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-key-2-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-key"/></svg></span>
             <span class="help-title">授权系统</span>
             <span class="help-desc">插件内置的授权系统</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-shield-user-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-shield"/></svg></span>
             <span class="help-title">群管系统</span>
             <span class="help-desc">仅限于群内使用</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-user-add-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-user-add"/></svg></span>
             <span class="help-title">邀人统计</span>
             <span class="help-desc">开启后可记录邀请次数，并且可一系列控制</span>
           </div>
         </div>
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-settings-3-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-settings"/></svg></span>
             <span class="help-title">事件管理</span>
             <span class="help-desc">各种开关的管理及介绍</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-music-2-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-music"/></svg></span>
             <span class="help-title">音乐系统</span>
             <span class="help-desc">听歌的，共4种音源，可语音、链接、卡片返回</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-video-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-video"/></svg></span>
             <span class="help-title">视频菜单</span>
             <span class="help-desc">接入了大量的视频接口，注：接口来源于网络</span>
           </div>
         </div>
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-account-box-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-account"/></svg></span>
             <span class="help-title">账号设置</span>
             <span class="help-desc">配置登录的机器人账号信息的，如头像昵称签名等</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-file-settings-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-file-settings"/></svg></span>
             <span class="help-title">插件配置</span>
             <span class="help-desc">该功能仅配置MK的config.json文件</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-links-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-links"/></svg></span>
             <span class="help-title">接口功能</span>
             <span class="help-desc">这个是本插件接入的第三方接口，都会在里面</span>
           </div>
         </div>
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-fire-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-fire"/></svg></span>
             <span class="help-title">管理续火</span>
             <span class="help-desc">每日续火，需先开启相关事件，支持好友/群聊，支持图片或文案</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-question-answer-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-qa"/></svg></span>
             <span class="help-title">问答系统</span>
             <span class="help-desc">有模糊问答 和 精准问答，支持图片回复</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-bank-card-2-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-card"/></svg></span>
             <span class="help-title">发卡系统</span>
             <span class="help-desc">全局发卡系统，可用于其他分发娱乐，使用归笺兑换，支持定价、改名等操作</span>
           </div>
@@ -405,51 +404,51 @@
       <div class="help-table">
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-calendar-check-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-calendar"/></svg></span>
             <span class="help-title">签到</span>
             <span class="help-desc">每日签到获取奖励</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-anchor-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-anchor"/></svg></span>
             <span class="help-title">钓鱼</span>
             <span class="help-desc">通过「每日签到」可获取诱饵钓鱼哦～</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-id-card-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-id-card"/></svg></span>
             <span class="help-title">我的信息</span>
             <span class="help-desc">查看游戏中你的信息</span>
           </div>
         </div>
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-bank-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-bank"/></svg></span>
             <span class="help-title">银行系统</span>
             <span class="help-desc">存钱的，有利润，非常建议把货币存进去</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-dice-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-dice"/></svg></span>
             <span class="help-title">幸运轮盘</span>
             <span class="help-desc">要来一把豪赌的轮盘吗！</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-mail-send-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-mail-send"/></svg></span>
             <span class="help-title">漂流瓶</span>
             <span class="help-desc">字面意思，不过没有隐私保护，直接公开瓶子主人</span>
           </div>
         </div>
         <div class="tr">
           <div class="td">
-            <span class="help-icon"><i class="ri-chat-3-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-chat"/></svg></span>
             <span class="help-title">伪造聊天</span>
             <span class="help-desc">目前版本仅支持纯文本伪造</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-heart-3-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-heart"/></svg></span>
             <span class="help-title">群老婆</span>
             <span class="help-desc">支持单群或全群</span>
           </div>
           <div class="td">
-            <span class="help-icon"><i class="ri-trophy-line"></i></span>
+            <span class="help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#mk-icon-trophy"/></svg></span>
             <span class="help-title">排行榜</span>
             <span class="help-desc">各种类型的排行名单</span>
           </div>
@@ -462,7 +461,7 @@
 
   <script>
     (function () {
-      var TIMEOUT = { bg: 15000, font: 3500, ready: 120 };
+      var TIMEOUT = { bg: 15000, ready: 120 };
       var BG = {
         landscape: "{{menuBgLandscape}}",
         portrait: "{{menuBgPortrait}}"
@@ -524,17 +523,6 @@
         return url;
       }
 
-      function waitFonts() {
-        if (!document.fonts) return Promise.resolve();
-        return withTimeout(
-          Promise.all([
-            document.fonts.load("18px remixicon").catch(function () {}),
-            document.fonts.ready
-          ]),
-          TIMEOUT.font
-        );
-      }
-
       function markReady() {
         if (state.ready) return;
         state.ready = true;
@@ -547,10 +535,7 @@
         state.preparing = (async function () {
           try {
             applyBackground();
-            await Promise.all([
-              waitForDomImage(bgImg, TIMEOUT.bg),
-              waitFonts()
-            ]);
+            await waitForDomImage(bgImg, TIMEOUT.bg);
             requestAnimationFrame(function () {
               requestAnimationFrame(markReady);
             });

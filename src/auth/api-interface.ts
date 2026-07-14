@@ -16,6 +16,8 @@ import type {
     MkReadB,
     MkWriteB,
 } from '../types';
+import { getRenderMode, isImageRenderEnabled } from '../lib/image-render';
+import { renderFortuneWithSharp } from '../lib/fortune-sharp-render';
 
 // ---------------------------------------------------------------------------
 // 领域类型
@@ -382,8 +384,7 @@ async function renderFortuneImageCard(
     d: ApiInterfaceDeps,
     renderData: FortuneRenderCard
 ): Promise<string | null | undefined> {
-    const { readA, renderHtmlWithCompat, puppeteer, buildSimpleFortuneHtml, logger } = d;
-    const htmlContent = readA('默认资源/今日运势.html');
+    const { readA, readB, renderHtmlWithCompat, puppeteer, buildSimpleFortuneHtml, logger, getDataPath } = d;
     const renderOptions: MkHtmlRenderOptions = {
         data: renderData as Record<string, unknown>,
         width: 720,
@@ -393,6 +394,22 @@ async function renderFortuneImageCard(
         waitForTimeout: 300,
     };
 
+    if (getRenderMode(readB) === 'sharp') {
+        const sharpImage = await renderFortuneWithSharp(
+            {
+                card: renderData,
+                pluginDir: String(ctx?.pluginPath || ''),
+                dataPath: getDataPath(),
+                width: 720,
+                height: 1280,
+            },
+            logger,
+        );
+        if (sharpImage) return sharpImage;
+        logger.warn('[Function] 今日运势 Sharp 渲染失败，已回退 HTML 渲染');
+    }
+
+    const htmlContent = readA('默认资源/今日运势.html');
     let finalImageData = await renderHtmlWithCompat(htmlContent, renderOptions);
     if (!finalImageData) {
         const simpleHtml = buildSimpleFortuneHtml(renderData);
@@ -551,8 +568,8 @@ async function handleFortuneCommands(
     const 细附 = entry?.unSignText;
     const { 图片, 图片远程 } = resolveFortuneImageFields(图片数据[图片序号]);
 
-    const 发送方式 = readB('config.json', 'cs_of', false);
-    if (isLegacyConfigFalse(发送方式)) {
+    const 图片渲染开 = isImageRenderEnabled(readB);
+    if (!图片渲染开) {
         await sendFortuneTextReply(event, 标题, 星数, 附言, 细附);
         return 'halt';
     }
@@ -560,7 +577,7 @@ async function handleFortuneCommands(
     void 发消息(event, [段_引用(event.message_id), 段_文本('正在获取图片，请稍等哟～')]);
 
     const fortuneSkipRawFallback = readB('config.json', '今日运势失败不发原图', false);
-    const useLocalFortune = isKakakeLikeFramework(ctx) && !isLegacyConfigFalse(发送方式);
+    const useLocalFortune = isKakakeLikeFramework(ctx) && 图片渲染开;
 
     const tryRenderFortuneCard = async (bg: FortuneBgConfig): Promise<boolean> => {
         const renderData = toFortuneRenderData(event, bg, 标题, 星数, 附言, 细附);

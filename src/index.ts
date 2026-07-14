@@ -44,6 +44,9 @@ export {
   qzoneLike,
   qzoneComment,
   qzoneReplyComment,
+  guanjiaTestSend,
+  captureGuanjiaTokenFromMessage,
+  ensureGuanjiaToken,
 } from './mkbot-core';
 
 export type { MkSendVideo, MkSendVoice, MkSendCard, MkSendMusicCard, MkSendMessage, MkSendMergeForward } from './types';
