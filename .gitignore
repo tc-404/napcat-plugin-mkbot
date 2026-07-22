@@ -1,0 +1,10 @@
+node_modules/
+napcat-plugin-mkbot/
+python/build/
+python/dist/
+python/dist-docker/
+python/build-docker/
+python/*.spec
+!python/prebuilt/**/*.gz
+*.log
+.DS_Store
